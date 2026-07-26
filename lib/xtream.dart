@@ -1,0 +1,210 @@
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+
+/// Proxy auf dem Hub (umgeht CORS, holt Provider-Daten server-zu-server).
+const String kProxy = 'https://hub.mtplyr.com/api/xt.php';
+
+class Account {
+  final String host, user, pass;
+  Account(this.host, this.user, this.pass);
+}
+
+/// Aktuelle Sitzung (Zugangsdaten), persistiert.
+class Session {
+  static Account? account;
+
+  static Future<void> load() async {
+    final p = await SharedPreferences.getInstance();
+    final h = p.getString('xt_host');
+    final u = p.getString('xt_user');
+    final pw = p.getString('xt_pass');
+    if (h != null && u != null && pw != null) account = Account(h, u, pw);
+  }
+
+  static Future<void> save(Account a) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString('xt_host', a.host);
+    await p.setString('xt_user', a.user);
+    await p.setString('xt_pass', a.pass);
+    account = a;
+  }
+
+  static Future<void> clear() async {
+    final p = await SharedPreferences.getInstance();
+    await p.remove('xt_host');
+    await p.remove('xt_user');
+    await p.remove('xt_pass');
+    account = null;
+  }
+}
+
+class Category {
+  final String id, name;
+  Category(this.id, this.name);
+}
+
+class Item {
+  final String id, name, icon;
+  final int num;
+  final String ext; // container_extension (Filme)
+  Item(this.id, this.name, this.icon, {this.num = 0, this.ext = ''});
+}
+
+class Xtream {
+  static String base(String host) {
+    var b = host.trim();
+    if (!RegExp(r'^https?://', caseSensitive: false).hasMatch(b)) b = 'http://$b';
+    return b.replaceAll(RegExp(r'/+$'), '');
+  }
+
+  static Future<dynamic> _get(String action, [Map<String, String>? extra]) async {
+    final a = Session.account!;
+    final uri = Uri.parse(kProxy).replace(queryParameters: {
+      'action': action, 'host': a.host, 'username': a.user, 'password': a.pass, ...?extra,
+    });
+    final r = await http.get(uri).timeout(const Duration(seconds: 25));
+    if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
+    return jsonDecode(r.body);
+  }
+
+  /// Verbindung testen + Konto-Infos holen.
+  static Future<Map<String, dynamic>?> userInfo(Account a) async {
+    final uri = Uri.parse(kProxy).replace(queryParameters: {
+      'action': 'user_info', 'host': a.host, 'username': a.user, 'password': a.pass,
+    });
+    try {
+      final r = await http.get(uri).timeout(const Duration(seconds: 20));
+      if (r.statusCode != 200) return null;
+      final j = jsonDecode(r.body);
+      if (j is Map && j['user_info'] is Map) {
+        return Map<String, dynamic>.from(j['user_info']);
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  static Future<List<Category>> categories(String type) async {
+    final action = type == 'live'
+        ? 'live_categories'
+        : type == 'vod'
+            ? 'vod_categories'
+            : 'series_categories';
+    final j = await _get(action);
+    if (j is! List) return [];
+    return j
+        .map((e) => Category(e['category_id'].toString(), (e['category_name'] ?? '').toString()))
+        .toList();
+  }
+
+  static Future<List<Item>> liveStreams(String catId) async {
+    final j = await _get('live_streams', {'category_id': catId});
+    if (j is! List) return [];
+    return j
+        .map((e) => Item(e['stream_id'].toString(), (e['name'] ?? '').toString(),
+            (e['stream_icon'] ?? '').toString(), num: int.tryParse('${e['num']}') ?? 0))
+        .toList();
+  }
+
+  static Future<List<Item>> vodStreams(String catId) async {
+    final j = await _get('vod_streams', {'category_id': catId});
+    if (j is! List) return [];
+    return j
+        .map((e) => Item(e['stream_id'].toString(), (e['name'] ?? '').toString(),
+            (e['stream_icon'] ?? e['cover'] ?? '').toString(),
+            ext: (e['container_extension'] ?? 'mp4').toString()))
+        .toList();
+  }
+
+  static Future<List<Item>> seriesList(String catId) async {
+    final j = await _get('series', {'category_id': catId});
+    if (j is! List) return [];
+    return j
+        .map((e) => Item(e['series_id'].toString(), (e['name'] ?? '').toString(),
+            (e['cover'] ?? '').toString()))
+        .toList();
+  }
+
+  /// Stream-URLs fuer den Player (nativer Build).
+  static String liveUrl(String streamId, {String ext = 'm3u8'}) {
+    final a = Session.account!;
+    return '${base(a.host)}/live/${a.user}/${a.pass}/$streamId.$ext';
+  }
+
+  static String vodUrl(String streamId, String ext) {
+    final a = Session.account!;
+    return '${base(a.host)}/movie/${a.user}/${a.pass}/$streamId.${ext.isEmpty ? 'mp4' : ext}';
+  }
+
+  static String seriesEpUrl(String epId, String ext) {
+    final a = Session.account!;
+    return '${base(a.host)}/series/${a.user}/${a.pass}/$epId.${ext.isEmpty ? 'mp4' : ext}';
+  }
+
+  /// Film-Details (Plot, Cover, Meta).
+  static Future<Map<String, dynamic>> vodInfo(String vodId) async {
+    final j = await _get('vod_info', {'vod_id': vodId});
+    return (j is Map) ? Map<String, dynamic>.from(j) : {};
+  }
+
+  /// Serien-Details (info + episodes je Staffel).
+  static Future<SeriesDetail> seriesInfo(String seriesId) async {
+    final j = await _get('series_info', {'series_id': seriesId});
+    final info = (j is Map && j['info'] is Map) ? Map<String, dynamic>.from(j['info']) : <String, dynamic>{};
+    final seasons = <String, List<Episode>>{};
+    if (j is Map && j['episodes'] is Map) {
+      (j['episodes'] as Map).forEach((season, eps) {
+        if (eps is List) {
+          seasons[season.toString()] = eps
+              .map((e) => Episode(
+                    e['id'].toString(),
+                    (e['title'] ?? 'Folge ${e['episode_num'] ?? ''}').toString(),
+                    (e['container_extension'] ?? 'mp4').toString(),
+                    int.tryParse('${e['episode_num']}') ?? 0,
+                  ))
+              .toList();
+        }
+      });
+    }
+    return SeriesDetail(info, seasons);
+  }
+}
+
+class Episode {
+  final String id, title, ext;
+  final int num;
+  Episode(this.id, this.title, this.ext, this.num);
+}
+
+/// Lokale Favoriten-Sender (persistiert).
+class FavStore {
+  static const _k = 'fav_live';
+  static List<Map<String, dynamic>> _cache = [];
+
+  static Future<void> load() async {
+    final p = await SharedPreferences.getInstance();
+    final s = p.getString(_k);
+    if (s != null) {
+      try { _cache = (jsonDecode(s) as List).map((e) => Map<String, dynamic>.from(e)).toList(); } catch (_) {}
+    }
+  }
+
+  static bool isFav(String id) => _cache.any((e) => e['id'] == id);
+  static List<Item> items() => _cache.map((e) => Item('${e['id']}', '${e['name']}', '${e['icon'] ?? ''}', num: e['num'] ?? 0)).toList();
+
+  static Future<void> toggle(Item it) async {
+    if (isFav(it.id)) {
+      _cache.removeWhere((e) => e['id'] == it.id);
+    } else {
+      _cache.add({'id': it.id, 'name': it.name, 'icon': it.icon, 'num': it.num});
+    }
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_k, jsonEncode(_cache));
+  }
+}
+
+class SeriesDetail {
+  final Map<String, dynamic> info;
+  final Map<String, List<Episode>> seasons;
+  SeriesDetail(this.info, this.seasons);
+}
