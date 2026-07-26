@@ -10,6 +10,7 @@ void main() async {
   SystemChrome.setPreferredOrientations(const [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
   await Session.load();
   await FavStore.load();
+  await Prefs.load();
   runApp(const VelaApp());
 }
 
@@ -893,31 +894,230 @@ class _PlayerScreenState extends State<PlayerScreen> {
 }
 
 // ============================ EINSTELLUNGEN ============================
-class SettingsScreen extends StatelessWidget {
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
   @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  int sel = 0;
+  final items = const ['Stream-Format', 'Kindersicherung', 'Versteckte Kategorien', 'Favoriten', 'Über Vela'];
+
+  @override
   Widget build(BuildContext context) {
-    final items = const ['Sprache', 'Versteckte Kategorien', 'Kindersicherung', 'Untertitelgröße', 'Stream-Format', 'Puffergröße', 'Verlauf löschen'];
+    final narrow = _narrow(context);
+    final list = Container(
+      decoration: BoxDecoration(color: kPanel.withValues(alpha: .5), borderRadius: BorderRadius.circular(14), border: Border.all(color: kLine)),
+      child: ListView.separated(
+        shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
+        itemCount: items.length,
+        separatorBuilder: (_, _) => const Divider(height: 1, color: kLine),
+        itemBuilder: (c, i) => GestureDetector(
+          onTap: () => setState(() => sel = i),
+          child: Container(
+            color: sel == i ? kBlue.withValues(alpha: .12) : Colors.transparent,
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+            child: Row(children: [Text(items[i], style: TextStyle(color: sel == i ? kBlue : kText, fontSize: 15, fontWeight: FontWeight.w600)), const Spacer(), const Icon(Icons.chevron_right_rounded, color: kMuted, size: 20)]),
+          ),
+        ),
+      ),
+    );
     return Scaffold(
       appBar: _subBar(context, 'Einstellungen'),
       body: Container(
         decoration: _bgDeco(),
         child: Padding(
           padding: const EdgeInsets.all(16),
-          child: Container(
-            decoration: BoxDecoration(color: kPanel.withValues(alpha: .5), borderRadius: BorderRadius.circular(14), border: Border.all(color: kLine)),
-            child: ListView.separated(
-              shrinkWrap: true,
-              itemCount: items.length,
-              separatorBuilder: (_, _) => const Divider(height: 1, color: kLine),
-              itemBuilder: (c, i) => Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-                child: Row(children: [Text(items[i], style: const TextStyle(color: kText, fontSize: 15, fontWeight: FontWeight.w600)), const Spacer(), const Icon(Icons.chevron_right_rounded, color: kMuted, size: 20)]),
-              ),
-            ),
-          ),
+          child: narrow
+              ? ListView(children: [list, const SizedBox(height: 16), _detail()])
+              : Row(crossAxisAlignment: CrossAxisAlignment.start, children: [Expanded(child: list), const SizedBox(width: 16), Expanded(flex: 2, child: _detail())]),
         ),
       ),
+    );
+  }
+
+  Widget _panel(Widget child) => Container(
+        width: double.infinity,
+        decoration: BoxDecoration(color: kPanel.withValues(alpha: .5), borderRadius: BorderRadius.circular(14), border: Border.all(color: kLine)),
+        padding: const EdgeInsets.all(18),
+        child: child,
+      );
+
+  Widget _detail() {
+    switch (sel) {
+      case 0: return _streamFormat();
+      case 1: return _parental();
+      case 2: return const _HiddenCats();
+      case 3: return _favs();
+      default: return _about();
+    }
+  }
+
+  Widget _streamFormat() => _panel(Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+        const Text('Stream-Format (Live)', style: TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 4),
+        const Text('Falls ein Sender nicht startet, das andere Format probieren.', style: TextStyle(color: kMuted, fontSize: 12.5)),
+        const SizedBox(height: 14),
+        _opt('TS (Standard)', Prefs.liveExt == 'ts', () { Prefs.setLiveExt('ts'); setState(() {}); }),
+        _opt('HLS (m3u8)', Prefs.liveExt == 'm3u8', () { Prefs.setLiveExt('m3u8'); setState(() {}); }),
+      ]));
+
+  Widget _opt(String label, bool on, VoidCallback onTap) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 8), padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          decoration: BoxDecoration(color: on ? kBlue.withValues(alpha: .14) : kPanel2, borderRadius: BorderRadius.circular(10), border: Border.all(color: on ? kBlue : kLine)),
+          child: Row(children: [Text(label, style: const TextStyle(color: kText, fontSize: 14, fontWeight: FontWeight.w600)), const Spacer(), if (on) const Icon(Icons.check_rounded, color: kBlue, size: 20)]),
+        ),
+      );
+
+  Widget _parental() => _panel(Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+        const Text('Kindersicherung', style: TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 4),
+        const Text('Blendet XXX-/18+-Kategorien überall aus.', style: TextStyle(color: kMuted, fontSize: 12.5)),
+        const SizedBox(height: 10),
+        Row(children: [
+          const Expanded(child: Text('Erwachsenen-Inhalte ausblenden', style: TextStyle(color: kText, fontSize: 14))),
+          Switch(value: Prefs.hideAdult, activeThumbColor: kBlue, onChanged: _toggleAdult),
+        ]),
+        const SizedBox(height: 6),
+        OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(side: const BorderSide(color: kLine)),
+          onPressed: _pinDialog,
+          icon: const Icon(Icons.lock_rounded, size: 18, color: kBlue),
+          label: Text(Prefs.hasPin ? 'PIN ändern' : 'PIN festlegen', style: const TextStyle(color: kBlue)),
+        ),
+      ]));
+
+  void _toggleAdult(bool v) async {
+    if (!v && Prefs.hasPin) {
+      final ok = await _askPin('PIN zum Freigeben');
+      if (!ok) return;
+    }
+    await Prefs.setHideAdult(v);
+    setState(() {});
+  }
+
+  Future<void> _pinDialog() async {
+    final c = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: kPanel,
+        title: const Text('PIN festlegen', style: TextStyle(color: kText)),
+        content: TextField(controller: c, keyboardType: TextInputType.number, obscureText: true, style: const TextStyle(color: kText), decoration: const InputDecoration(hintText: 'Mind. 4 Ziffern', hintStyle: TextStyle(color: kMuted))),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Abbrechen')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Speichern')),
+        ],
+      ),
+    );
+    if (ok == true && c.text.trim().length >= 4) { await Prefs.setPin(c.text.trim()); setState(() {}); }
+  }
+
+  Future<bool> _askPin(String title) async {
+    final c = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: kPanel,
+        title: Text(title, style: const TextStyle(color: kText)),
+        content: TextField(controller: c, keyboardType: TextInputType.number, obscureText: true, style: const TextStyle(color: kText), decoration: const InputDecoration(hintText: 'PIN', hintStyle: TextStyle(color: kMuted))),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Abbrechen')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('OK')),
+        ],
+      ),
+    );
+    return ok == true && Prefs.checkPin(c.text.trim());
+  }
+
+  Widget _favs() => _panel(Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+        const Text('Favoriten', style: TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 4),
+        Text('${FavStore.items().length} gespeicherte Sender', style: const TextStyle(color: kMuted, fontSize: 12.5)),
+        const SizedBox(height: 14),
+        OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(side: const BorderSide(color: kLine)),
+          onPressed: () async {
+            for (final it in FavStore.items()) { await FavStore.toggle(it); }
+            if (mounted) setState(() {});
+          },
+          icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFF2A0A0), size: 18),
+          label: const Text('Alle Favoriten löschen', style: TextStyle(color: kText)),
+        ),
+      ]));
+
+  Widget _about() => _panel(Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: const [
+        Text('Vela Player', style: TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w700)),
+        SizedBox(height: 8),
+        Text('Version 1.0 · Beta', style: TextStyle(color: kMuted, fontSize: 13)),
+      ]));
+}
+
+class _HiddenCats extends StatefulWidget {
+  const _HiddenCats();
+  @override
+  State<_HiddenCats> createState() => _HiddenCatsState();
+}
+
+class _HiddenCatsState extends State<_HiddenCats> {
+  String type = 'live';
+  List<Category> cats = [];
+  bool loading = true;
+
+  @override
+  void initState() { super.initState(); _load(); }
+
+  Future<void> _load() async {
+    setState(() => loading = true);
+    try { cats = await Xtream.categoriesRaw(type); } catch (_) {}
+    if (mounted) setState(() => loading = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(color: kPanel.withValues(alpha: .5), borderRadius: BorderRadius.circular(14), border: Border.all(color: kLine)),
+      padding: const EdgeInsets.all(16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Versteckte Kategorien', style: TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 10),
+        Row(children: [
+          for (final t in const [['live', 'Live'], ['vod', 'Filme'], ['series', 'Serien']])
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: GestureDetector(
+                onTap: () { type = t[0]; _load(); },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(color: type == t[0] ? kBlue : kPanel2, borderRadius: BorderRadius.circular(18), border: Border.all(color: type == t[0] ? kBlue : kLine)),
+                  child: Text(t[1], style: TextStyle(color: type == t[0] ? kBg : kMuted, fontWeight: FontWeight.w600, fontSize: 12.5)),
+                ),
+              ),
+            ),
+        ]),
+        const SizedBox(height: 10),
+        SizedBox(
+          height: 300,
+          child: loading
+              ? _loading()
+              : ListView.builder(
+                  itemCount: cats.length,
+                  itemBuilder: (c, i) {
+                    final name = cats[i].name;
+                    final hidden = Prefs.hidden.contains(name);
+                    return ListTile(
+                      dense: true,
+                      title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kText, fontSize: 13.5)),
+                      trailing: Switch(value: !hidden, activeThumbColor: kBlue, onChanged: (v) async { await Prefs.toggleHidden(name); if (mounted) setState(() {}); }),
+                    );
+                  },
+                ),
+        ),
+      ]),
     );
   }
 }

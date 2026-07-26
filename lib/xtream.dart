@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -84,7 +85,7 @@ class Xtream {
     return null;
   }
 
-  static Future<List<Category>> categories(String type) async {
+  static Future<List<Category>> categoriesRaw(String type) async {
     final action = type == 'live'
         ? 'live_categories'
         : type == 'vod'
@@ -95,6 +96,12 @@ class Xtream {
     return j
         .map((e) => Category(e['category_id'].toString(), (e['category_name'] ?? '').toString()))
         .toList();
+  }
+
+  /// Sichtbare Kategorien (versteckte + Adult je nach Einstellung ausgeblendet).
+  static Future<List<Category>> categories(String type) async {
+    final all = await categoriesRaw(type);
+    return all.where((c) => Prefs.visible(c.name)).toList();
   }
 
   static Future<List<Item>> liveStreams(String catId) async {
@@ -126,9 +133,9 @@ class Xtream {
   }
 
   /// Stream-URLs fuer den Player (nativer Build).
-  static String liveUrl(String streamId, {String ext = 'm3u8'}) {
+  static String liveUrl(String streamId) {
     final a = Session.account!;
-    return '${base(a.host)}/live/${a.user}/${a.pass}/$streamId.$ext';
+    return '${base(a.host)}/live/${a.user}/${a.pass}/$streamId.${Prefs.liveExt}';
   }
 
   static String vodUrl(String streamId, String ext) {
@@ -186,6 +193,41 @@ class Episode {
   final String id, title, ext;
   final int num;
   Episode(this.id, this.title, this.ext, this.num);
+}
+
+/// App-Einstellungen (persistiert).
+class Prefs {
+  static String liveExt = 'ts'; // 'ts' oder 'm3u8'
+  static bool hideAdult = false;
+  static Set<String> hidden = {};
+  static String? pinHash;
+
+  static const _adult = ['XXX', 'ADULT', '+18', '18+', 'EROTIC', 'EROTIK', 'PORN', 'PORNO', 'FSK18', 'NIGHT CLUB'];
+
+  static Future<void> load() async {
+    final p = await SharedPreferences.getInstance();
+    liveExt = p.getString('live_ext') ?? 'ts';
+    hideAdult = p.getBool('hide_adult') ?? false;
+    hidden = (p.getStringList('hidden_cats') ?? []).toSet();
+    pinHash = p.getString('pin_hash');
+  }
+
+  static Future<void> _p(Function(SharedPreferences) f) async => f(await SharedPreferences.getInstance());
+
+  static Future<void> setLiveExt(String v) async { liveExt = v; await _p((p) => p.setString('live_ext', v)); }
+  static Future<void> setHideAdult(bool v) async { hideAdult = v; await _p((p) => p.setBool('hide_adult', v)); }
+  static Future<void> toggleHidden(String name) async {
+    hidden.contains(name) ? hidden.remove(name) : hidden.add(name);
+    await _p((p) => p.setStringList('hidden_cats', hidden.toList()));
+  }
+
+  static String _sha(String s) => sha256.convert(utf8.encode(s)).toString();
+  static bool get hasPin => pinHash != null && pinHash!.isNotEmpty;
+  static bool checkPin(String pin) => !hasPin || pinHash == _sha(pin);
+  static Future<void> setPin(String pin) async { pinHash = _sha(pin); await _p((p) => p.setString('pin_hash', pinHash!)); }
+
+  static bool isAdult(String name) { final u = name.toUpperCase(); return _adult.any((k) => u.contains(k)); }
+  static bool visible(String name) => !hidden.contains(name) && !(hideAdult && isAdult(name));
 }
 
 /// Lokale Favoriten-Sender (persistiert).
