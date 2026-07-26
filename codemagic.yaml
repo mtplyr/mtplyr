@@ -15,6 +15,38 @@
 # mit Sideloadly/3uTools aufs iPhone.
 
 workflows:
+
+  # Unsignierte .ipa – braucht KEIN Apple-Konto. Mit Sideloadly (eigene Apple-ID)
+  # signieren + aufs iPhone installieren. Für sofortigen Test, solange die
+  # Developer-Mitgliedschaft noch nicht freigeschaltet ist.
+  ios-unsigned:
+    name: Vela iOS (unsigniert, fuer Sideloadly)
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Flutter-Pakete
+        script: flutter pub get
+      - name: Pods installieren
+        script: find . -name "Podfile" -execdir pod install \;
+      - name: Unsigniert bauen
+        script: flutter build ios --release --no-codesign
+      - name: Als .ipa verpacken
+        script: |
+          cd build/ios/iphoneos
+          mkdir -p Payload
+          cp -r Runner.app Payload/
+          zip -r vela-unsigned.ipa Payload
+    artifacts:
+      - build/ios/iphoneos/vela-unsigned.ipa
+    publishing:
+      email:
+        recipients:
+          - okan_2oo8@hotmail.de
+
   ios-adhoc:
     name: Vela iOS (Ad Hoc)
     instance_type: mac_mini_m2
