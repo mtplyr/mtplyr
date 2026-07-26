@@ -141,6 +141,18 @@ class Xtream {
     return '${base(a.host)}/series/${a.user}/${a.pass}/$epId.${ext.isEmpty ? 'mp4' : ext}';
   }
 
+  /// Aktuell laufende Sendung (EPG) eines Live-Senders – Titel (base64-dekodiert).
+  static Future<String> nowPlaying(String streamId) async {
+    try {
+      final j = await _get('short_epg', {'stream_id': streamId, 'limit': '1'});
+      if (j is Map && j['epg_listings'] is List && (j['epg_listings'] as List).isNotEmpty) {
+        final t = '${(j['epg_listings'] as List).first['title'] ?? ''}';
+        try { return utf8.decode(base64.decode(t)); } catch (_) { return t; }
+      }
+    } catch (_) {}
+    return '';
+  }
+
   /// Film-Details (Plot, Cover, Meta).
   static Future<Map<String, dynamic>> vodInfo(String vodId) async {
     final j = await _get('vod_info', {'vod_id': vodId});

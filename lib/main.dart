@@ -393,7 +393,10 @@ class _LiveScreenState extends State<LiveScreen> {
                   final ch = items[i];
                   final fav = FavStore.isFav(ch.id);
                   return GestureDetector(
-                    onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(title: ch.name, url: Xtream.liveUrl(ch.id)))),
+                    onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(
+                          title: ch.name, url: Xtream.liveUrl(ch.id),
+                          channels: items, index: i, urlFor: (c) => Xtream.liveUrl(c.id),
+                        ))),
                     child: Container(
                       margin: const EdgeInsets.symmetric(vertical: 3),
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -781,7 +784,10 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
 // ============================ PLAYER (Platzhalter – VLC im nativen Build) ============================
 class PlayerScreen extends StatefulWidget {
   final String title, url;
-  const PlayerScreen({super.key, required this.title, required this.url});
+  final List<Item>? channels; // gesetzt = Live (Zapping möglich)
+  final int index;
+  final String Function(Item)? urlFor;
+  const PlayerScreen({super.key, required this.title, required this.url, this.channels, this.index = 0, this.urlFor});
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
 }
@@ -789,11 +795,23 @@ class PlayerScreen extends StatefulWidget {
 class _PlayerScreenState extends State<PlayerScreen> {
   late final Player player = Player();
   late final VideoController controller = VideoController(player);
+  late String title = widget.title;
+  late int idx = widget.index;
+  String epg = '';
 
   @override
   void initState() {
     super.initState();
     player.open(Media(widget.url));
+    _loadEpg();
+  }
+
+  Future<void> _loadEpg() async {
+    final ch = widget.channels;
+    if (ch == null) return;
+    setState(() => epg = '');
+    final t = await Xtream.nowPlaying(ch[idx].id);
+    if (mounted) setState(() => epg = t);
   }
 
   @override
@@ -802,11 +820,73 @@ class _PlayerScreenState extends State<PlayerScreen> {
     super.dispose();
   }
 
+  void _zap(int delta) {
+    final ch = widget.channels;
+    if (ch == null || widget.urlFor == null) return;
+    final n = idx + delta;
+    if (n < 0 || n >= ch.length) return;
+    setState(() { idx = n; title = ch[n].name; });
+    player.open(Media(widget.urlFor!(ch[n])));
+    _loadEpg();
+  }
+
+  void _tracks(bool audio) {
+    final list = audio ? player.state.tracks.audio : player.state.tracks.subtitle;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: kPanel,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (_) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Padding(padding: const EdgeInsets.all(16), child: Text(audio ? 'Audiospur wählen' : 'Untertitel wählen', style: const TextStyle(color: kText, fontWeight: FontWeight.w700, fontSize: 16))),
+          if (list.isEmpty) const Padding(padding: EdgeInsets.only(bottom: 20), child: Text('Keine Spuren verfügbar', style: TextStyle(color: kMuted))),
+          Flexible(
+            child: ListView(shrinkWrap: true, children: [
+              for (final t in list)
+                ListTile(
+                  leading: const Icon(Icons.audiotrack_rounded, color: kBlue, size: 18),
+                  title: Text(_trackLabel(t), style: const TextStyle(color: kText, fontSize: 14)),
+                  onTap: () {
+                    if (audio) { player.setAudioTrack(t as AudioTrack); } else { player.setSubtitleTrack(t as SubtitleTrack); }
+                    Navigator.pop(context);
+                  },
+                ),
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  String _trackLabel(dynamic t) {
+    final ttl = t.title as String?;
+    final lang = t.language as String?;
+    if (ttl != null && ttl.isNotEmpty) return ttl;
+    if (lang != null && lang.isNotEmpty) return lang;
+    return '${t.id}';
+  }
+
   @override
   Widget build(BuildContext context) {
+    final live = widget.channels != null;
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: _subBar(context, widget.title),
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        elevation: 0,
+        leading: IconButton(icon: const Icon(Icons.arrow_back_ios_new_rounded, color: kText, size: 20), onPressed: () => Navigator.pop(context)),
+        title: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kText, fontWeight: FontWeight.w800, fontFamily: 'serif', fontSize: 20)),
+          if (epg.isNotEmpty) Text('Jetzt: $epg', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kBlue, fontSize: 12, fontWeight: FontWeight.w500)),
+        ]),
+        actions: [
+          if (live) IconButton(icon: const Icon(Icons.skip_previous_rounded, color: kText), tooltip: 'Vorheriger Sender', onPressed: () => _zap(-1)),
+          if (live) IconButton(icon: const Icon(Icons.skip_next_rounded, color: kText), tooltip: 'Nächster Sender', onPressed: () => _zap(1)),
+          IconButton(icon: const Icon(Icons.audiotrack_rounded, color: kText), tooltip: 'Audiospur', onPressed: () => _tracks(true)),
+          IconButton(icon: const Icon(Icons.closed_caption_rounded, color: kText), tooltip: 'Untertitel', onPressed: () => _tracks(false)),
+          const SizedBox(width: 8),
+        ],
+      ),
       body: Video(controller: controller, controls: AdaptiveVideoControls),
     );
   }
