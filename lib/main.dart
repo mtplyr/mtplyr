@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:media_kit/media_kit.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 import 'xtream.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  MediaKit.ensureInitialized();
   SystemChrome.setPreferredOrientations(const [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
   await Session.load();
   await FavStore.load();
@@ -776,28 +779,35 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
 }
 
 // ============================ PLAYER (Platzhalter – VLC im nativen Build) ============================
-class PlayerScreen extends StatelessWidget {
+class PlayerScreen extends StatefulWidget {
   final String title, url;
   const PlayerScreen({super.key, required this.title, required this.url});
+  @override
+  State<PlayerScreen> createState() => _PlayerScreenState();
+}
+
+class _PlayerScreenState extends State<PlayerScreen> {
+  late final Player player = Player();
+  late final VideoController controller = VideoController(player);
+
+  @override
+  void initState() {
+    super.initState();
+    player.open(Media(widget.url));
+  }
+
+  @override
+  void dispose() {
+    player.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: _subBar(context, title),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            const Icon(Icons.play_circle_fill_rounded, color: kBlue, size: 72),
-            const SizedBox(height: 16),
-            Text(title, textAlign: TextAlign.center, style: const TextStyle(color: kText, fontSize: 18, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 10),
-            const Text('Wiedergabe läuft in der nativen App (VLC).\nStream ist verbunden:', textAlign: TextAlign.center, style: TextStyle(color: kMuted, fontSize: 13)),
-            const SizedBox(height: 8),
-            SelectableText(url, textAlign: TextAlign.center, style: const TextStyle(color: kBlue, fontSize: 11)),
-          ]),
-        ),
-      ),
+      appBar: _subBar(context, widget.title),
+      body: Video(controller: controller, controls: AdaptiveVideoControls),
     );
   }
 }

@@ -24,4 +24,4 @@ Kurzanleitung, um aus diesem Projekt eine **signierte .ipa** fuer dein iPhone zu
 ## Hinweise
 - Bundle-ID: **com.vela.velaplayer**
 - Die App laeuft fest im **Querformat** (wie IBO).
-- Wiedergabe nutzt im nativen Build den VLC-Player (spielt HLS/TS/MP4/4K).
+- Wiedergabe nutzt den media_kit-Player (libmpv) – spielt HLS/TS/MP4/MKV/4K.
