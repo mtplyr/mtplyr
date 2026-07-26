@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
@@ -11,6 +12,7 @@ void main() async {
   await Session.load();
   await FavStore.load();
   await Prefs.load();
+  await ResumeStore.load();
   runApp(const VelaApp());
 }
 
@@ -650,7 +652,7 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                         width: 220, height: 52,
                         child: FilledButton.icon(
                           style: FilledButton.styleFrom(backgroundColor: kBlue, foregroundColor: kBg, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                          onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(title: widget.item.name, url: Xtream.vodUrl(widget.item.id, ext)))),
+                          onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(title: widget.item.name, url: Xtream.vodUrl(widget.item.id, ext), resume: true))),
                           icon: const Icon(Icons.play_arrow_rounded),
                           label: const Text('Abspielen', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                         ),
@@ -757,7 +759,7 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
                                 itemBuilder: (c, i) {
                                   final e = eps[i];
                                   return GestureDetector(
-                                    onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(title: e.title, url: Xtream.seriesEpUrl(e.id, e.ext)))),
+                                    onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(title: e.title, url: Xtream.seriesEpUrl(e.id, e.ext), resume: true))),
                                     child: Container(
                                       margin: const EdgeInsets.symmetric(vertical: 4),
                                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -788,7 +790,8 @@ class PlayerScreen extends StatefulWidget {
   final List<Item>? channels; // gesetzt = Live (Zapping möglich)
   final int index;
   final String Function(Item)? urlFor;
-  const PlayerScreen({super.key, required this.title, required this.url, this.channels, this.index = 0, this.urlFor});
+  final bool resume; // Filme/Serien: Position merken & fortsetzen
+  const PlayerScreen({super.key, required this.title, required this.url, this.channels, this.index = 0, this.urlFor, this.resume = false});
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
 }
@@ -799,12 +802,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
   late String title = widget.title;
   late int idx = widget.index;
   String epg = '';
+  StreamSubscription? _durSub;
+  bool _seeked = false;
 
   @override
   void initState() {
     super.initState();
     player.open(Media(widget.url));
     _loadEpg();
+    if (widget.resume) {
+      _durSub = player.stream.duration.listen((d) {
+        if (!_seeked && d > Duration.zero) {
+          _seeked = true;
+          final s = ResumeStore.get(widget.url);
+          if (s > 5) player.seek(Duration(seconds: s));
+        }
+      });
+    }
   }
 
   Future<void> _loadEpg() async {
@@ -817,6 +831,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   void dispose() {
+    if (widget.resume) {
+      ResumeStore.set(widget.url, player.state.position.inSeconds, player.state.duration.inSeconds);
+    }
+    _durSub?.cancel();
     player.dispose();
     super.dispose();
   }

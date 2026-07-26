@@ -230,6 +230,32 @@ class Prefs {
   static bool visible(String name) => !hidden.contains(name) && !(hideAdult && isAdult(name));
 }
 
+/// Wiedergabe-Position merken (Weiterschauen), persistiert. Schlüssel = Stream-URL.
+class ResumeStore {
+  static Map<String, int> _pos = {};
+
+  static Future<void> load() async {
+    final p = await SharedPreferences.getInstance();
+    final s = p.getString('resume_pos');
+    if (s != null) {
+      try { _pos = Map<String, int>.from(jsonDecode(s)); } catch (_) {}
+    }
+  }
+
+  static int get(String url) => _pos[url] ?? 0;
+
+  static Future<void> set(String url, int pos, int dur) async {
+    // nur merken, wenn mittendrin (nicht ganz am Anfang/Ende)
+    if (pos > 20 && (dur == 0 || pos < dur - 90)) {
+      _pos[url] = pos;
+    } else {
+      _pos.remove(url);
+    }
+    final p = await SharedPreferences.getInstance();
+    await p.setString('resume_pos', jsonEncode(_pos));
+  }
+}
+
 /// Lokale Favoriten-Sender (persistiert).
 class FavStore {
   static const _k = 'fav_live';
