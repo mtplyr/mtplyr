@@ -176,7 +176,7 @@ class HomeScreen extends StatelessWidget {
         _Tile('Live-TV', 'Fernsehen live', Icons.live_tv_rounded, const Color(0xFF6FB1F2), () => _open(c, const LiveScreen())),
         _Tile('Filme', 'Spielfilme', Icons.movie_creation_rounded, const Color(0xFF8FA6F0), () => _open(c, const CatalogScreen(title: 'Filme', type: 'vod'))),
         _Tile('Serien', 'Serien & Staffeln', Icons.theaters_rounded, const Color(0xFF6FD0C8), () => _open(c, const CatalogScreen(title: 'Serien', type: 'series'))),
-        _Tile('Replay', 'Verpasstes nachholen', Icons.replay_rounded, const Color(0xFFE0B366), () => _open(c, const CatalogScreen(title: 'Replay', type: 'vod'))),
+        _Tile('Replay', 'Live-Sender', Icons.replay_rounded, const Color(0xFFE0B366), () => _open(c, const LiveScreen())),
       ];
 
   @override
@@ -192,7 +192,7 @@ class HomeScreen extends StatelessWidget {
               Row(children: [
                 const VelaLogo(size: 30),
                 const Spacer(),
-                _iconBox(Icons.search_rounded),
+                _iconBox(Icons.search_rounded, onTap: () => _open(context, const SearchScreen())),
                 const SizedBox(width: 10),
                 _iconBox(Icons.settings_rounded, onTap: () => _open(context, const SettingsScreen())),
                 const SizedBox(width: 10),
@@ -585,6 +585,117 @@ class _CatalogScreenState extends State<CatalogScreen> {
       );
 }
 
+// ============================ SUCHE ============================
+class SearchScreen extends StatefulWidget {
+  const SearchScreen({super.key});
+  @override
+  State<SearchScreen> createState() => _SearchScreenState();
+}
+
+class _SearchScreenState extends State<SearchScreen> {
+  List<Item> vod = [], series = [];
+  bool loading = true;
+  String query = '';
+  int tab = 0; // 0 = Filme, 1 = Serien
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final r = await Future.wait([Xtream.allVod(), Xtream.allSeries()]);
+      vod = r[0];
+      series = r[1];
+    } catch (_) {}
+    if (mounted) setState(() => loading = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final src = tab == 0 ? vod : series;
+    final results = query.length < 2 ? <Item>[] : src.where((e) => e.name.toLowerCase().contains(query.toLowerCase())).take(80).toList();
+    return Scaffold(
+      appBar: _subBar(context, 'Suche'),
+      body: Container(
+        decoration: _bgDeco(),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(children: [
+              TextField(
+                autofocus: true,
+                onChanged: (v) => setState(() => query = v),
+                style: const TextStyle(color: kText),
+                decoration: InputDecoration(
+                  hintText: 'Film oder Serie suchen…', hintStyle: const TextStyle(color: kMuted),
+                  prefixIcon: const Icon(Icons.search_rounded, color: kMuted),
+                  filled: true, fillColor: kPanel2,
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: kLine)),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: kBlue)),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Row(children: [
+                for (final t in const [[0, 'Filme'], [1, 'Serien']])
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: GestureDetector(
+                      onTap: () => setState(() => tab = t[0] as int),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        decoration: BoxDecoration(color: tab == t[0] ? kBlue : kPanel2, borderRadius: BorderRadius.circular(18), border: Border.all(color: tab == t[0] ? kBlue : kLine)),
+                        child: Text(t[1] as String, style: TextStyle(color: tab == t[0] ? kBg : kMuted, fontWeight: FontWeight.w600, fontSize: 12.5)),
+                      ),
+                    ),
+                  ),
+              ]),
+              const SizedBox(height: 10),
+              Expanded(
+                child: loading
+                    ? _loading()
+                    : query.length < 2
+                        ? _empty('Mindestens 2 Zeichen eingeben')
+                        : results.isEmpty
+                            ? _empty('Keine Treffer')
+                            : LayoutBuilder(builder: (c, cons) {
+                                final cols = (cons.maxWidth / 130).floor().clamp(2, 8);
+                                return GridView.builder(
+                                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: cols, mainAxisSpacing: 12, crossAxisSpacing: 12, childAspectRatio: .58),
+                                  itemCount: results.length,
+                                  itemBuilder: (c, i) => _poster(results[i]),
+                                );
+                              }),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _poster(Item it) => GestureDetector(
+        onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => tab == 1 ? SeriesDetailScreen(item: it) : MovieDetailScreen(item: it))),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: Container(
+                width: double.infinity, color: kPanel2,
+                child: it.icon.isEmpty
+                    ? const Icon(Icons.movie_rounded, color: kMuted, size: 32)
+                    : Image.network(it.icon, fit: BoxFit.cover, errorBuilder: (_, _, _) => const Icon(Icons.movie_rounded, color: kMuted, size: 32)),
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(it.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kText, fontSize: 12, fontWeight: FontWeight.w600)),
+        ]),
+      );
+}
+
 // ============================ FILM-DETAIL ============================
 class MovieDetailScreen extends StatefulWidget {
   final Item item;
@@ -888,25 +999,40 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   Widget build(BuildContext context) {
     final live = widget.channels != null;
+    final safe = MediaQuery.of(context).padding;
+    double ins(double v, double min) => v < min ? min : v;
+    // Bedienelemente von den (abgerundeten) Rändern wegrücken + oben auto-ausblenden.
+    final controls = MaterialVideoControlsThemeData(
+      seekOnDoubleTap: true, // Doppeltipp links/rechts = zurück/vor spulen (wie YouTube)
+      padding: EdgeInsets.only(
+        left: ins(safe.left, 16), right: ins(safe.right, 16),
+        top: ins(safe.top, 8), bottom: ins(safe.bottom, 10),
+      ),
+      seekBarMargin: const EdgeInsets.only(bottom: 26, left: 10, right: 10),
+      bottomButtonBarMargin: const EdgeInsets.only(bottom: 8, left: 8, right: 8),
+      topButtonBarMargin: const EdgeInsets.only(top: 4, left: 4, right: 4),
+      topButtonBar: [
+        MaterialCustomButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 22)),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontFamily: 'serif', fontSize: 18)),
+            if (epg.isNotEmpty) Text('Jetzt: $epg', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kBlue, fontSize: 11.5, fontWeight: FontWeight.w500)),
+          ]),
+        ),
+        if (live) MaterialCustomButton(onPressed: () => _zap(-1), icon: const Icon(Icons.skip_previous_rounded, color: Colors.white)),
+        if (live) MaterialCustomButton(onPressed: () => _zap(1), icon: const Icon(Icons.skip_next_rounded, color: Colors.white)),
+        MaterialCustomButton(onPressed: () => _tracks(true), icon: const Icon(Icons.audiotrack_rounded, color: Colors.white)),
+        MaterialCustomButton(onPressed: () => _tracks(false), icon: const Icon(Icons.closed_caption_rounded, color: Colors.white)),
+      ],
+    );
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        elevation: 0,
-        leading: IconButton(icon: const Icon(Icons.arrow_back_ios_new_rounded, color: kText, size: 20), onPressed: () => Navigator.pop(context)),
-        title: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kText, fontWeight: FontWeight.w800, fontFamily: 'serif', fontSize: 20)),
-          if (epg.isNotEmpty) Text('Jetzt: $epg', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kBlue, fontSize: 12, fontWeight: FontWeight.w500)),
-        ]),
-        actions: [
-          if (live) IconButton(icon: const Icon(Icons.skip_previous_rounded, color: kText), tooltip: 'Vorheriger Sender', onPressed: () => _zap(-1)),
-          if (live) IconButton(icon: const Icon(Icons.skip_next_rounded, color: kText), tooltip: 'Nächster Sender', onPressed: () => _zap(1)),
-          IconButton(icon: const Icon(Icons.audiotrack_rounded, color: kText), tooltip: 'Audiospur', onPressed: () => _tracks(true)),
-          IconButton(icon: const Icon(Icons.closed_caption_rounded, color: kText), tooltip: 'Untertitel', onPressed: () => _tracks(false)),
-          const SizedBox(width: 8),
-        ],
+      body: MaterialVideoControlsTheme(
+        normal: controls,
+        fullscreen: controls,
+        child: Video(controller: controller),
       ),
-      body: Video(controller: controller, controls: AdaptiveVideoControls),
     );
   }
 }
@@ -945,11 +1071,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
       appBar: _subBar(context, 'Einstellungen'),
       body: Container(
         decoration: _bgDeco(),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: narrow
-              ? ListView(children: [list, const SizedBox(height: 16), _detail()])
-              : Row(crossAxisAlignment: CrossAxisAlignment.start, children: [Expanded(child: list), const SizedBox(width: 16), Expanded(flex: 2, child: _detail())]),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: narrow
+                ? ListView(children: [list, const SizedBox(height: 16), _detail()])
+                : Row(crossAxisAlignment: CrossAxisAlignment.start, children: [Expanded(child: list), const SizedBox(width: 16), Expanded(flex: 2, child: _detail())]),
+          ),
         ),
       ),
     );
@@ -1119,10 +1247,11 @@ class _HiddenCatsState extends State<_HiddenCats> {
         ]),
         const SizedBox(height: 10),
         SizedBox(
-          height: 300,
+          height: (MediaQuery.of(context).size.height * 0.6).clamp(160.0, 520.0),
           child: loading
               ? _loading()
               : ListView.builder(
+                  padding: const EdgeInsets.only(bottom: 8),
                   itemCount: cats.length,
                   itemBuilder: (c, i) {
                     final name = cats[i].name;

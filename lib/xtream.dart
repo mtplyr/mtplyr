@@ -123,6 +123,25 @@ class Xtream {
         .toList();
   }
 
+  /// Alle Filme / Serien (ohne Kategorie) – für die globale Suche.
+  static Future<List<Item>> allVod() async {
+    final j = await _get('vod_streams');
+    if (j is! List) return [];
+    return j
+        .map((e) => Item(e['stream_id'].toString(), (e['name'] ?? '').toString(),
+            (e['stream_icon'] ?? e['cover'] ?? '').toString(),
+            ext: (e['container_extension'] ?? 'mp4').toString()))
+        .toList();
+  }
+
+  static Future<List<Item>> allSeries() async {
+    final j = await _get('series');
+    if (j is! List) return [];
+    return j
+        .map((e) => Item(e['series_id'].toString(), (e['name'] ?? '').toString(), (e['cover'] ?? '').toString()))
+        .toList();
+  }
+
   static Future<List<Item>> seriesList(String catId) async {
     final j = await _get('series', {'category_id': catId});
     if (j is! List) return [];
