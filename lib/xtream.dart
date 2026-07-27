@@ -167,6 +167,44 @@ class Xtream {
     return '${base(a.host)}/series/${a.user}/${a.pass}/$epId.${ext.isEmpty ? 'mp4' : ext}';
   }
 
+  /// EPG-Archiv (vergangene Sendungen mit Aufzeichnung) eines Senders – für Catch-Up.
+  static Future<List<Program>> archive(String streamId) async {
+    final j = await _get('simple_data_table', {'stream_id': streamId});
+    final list = (j is Map && j['epg_listings'] is List)
+        ? j['epg_listings'] as List
+        : (j is List ? j : const []);
+    final out = <Program>[];
+    for (final e in list) {
+      final startRaw = '${e['start'] ?? ''}';
+      final endRaw = '${e['end'] ?? ''}';
+      DateTime? s = DateTime.tryParse(startRaw.replaceFirst(' ', 'T'));
+      DateTime? en = DateTime.tryParse(endRaw.replaceFirst(' ', 'T'));
+      if (s == null) { final t = int.tryParse('${e['start_timestamp']}'); if (t != null) s = DateTime.fromMillisecondsSinceEpoch(t * 1000); }
+      if (en == null) { final t = int.tryParse('${e['stop_timestamp']}'); if (t != null) en = DateTime.fromMillisecondsSinceEpoch(t * 1000); }
+      if (s == null || en == null) continue;
+      String title = '${e['title'] ?? ''}';
+      try { title = utf8.decode(base64.decode(title)); } catch (_) {}
+      final has = '${e['has_archive'] ?? e['now_playing'] ?? '0'}' == '1';
+      out.add(Program(title, startRaw, s, en, has));
+    }
+    return out;
+  }
+
+  /// Timeshift-/Catch-Up-URL für eine vergangene Sendung.
+  static String timeshiftUrl(String streamId, Program p) {
+    final a = Session.account!;
+    String start;
+    if (p.startRaw.contains(' ') && p.startRaw.length >= 16) {
+      final parts = p.startRaw.split(' ');
+      start = '${parts[0]}:${parts[1].substring(0, 5).replaceAll(':', '-')}';
+    } else {
+      String two(int x) => x.toString().padLeft(2, '0');
+      start = '${p.start.year}-${two(p.start.month)}-${two(p.start.day)}:${two(p.start.hour)}-${two(p.start.minute)}';
+    }
+    final dur = p.durationMin <= 0 ? 60 : p.durationMin;
+    return '${base(a.host)}/streaming/timeshift.php?username=${a.user}&password=${a.pass}&stream=$streamId&start=$start&duration=$dur';
+  }
+
   /// Aktuell laufende Sendung (EPG) eines Live-Senders – Titel (base64-dekodiert).
   static Future<String> nowPlaying(String streamId) async {
     try {
@@ -212,6 +250,14 @@ class Episode {
   final String id, title, ext;
   final int num;
   Episode(this.id, this.title, this.ext, this.num);
+}
+
+class Program {
+  final String title, startRaw;
+  final DateTime start, end;
+  final bool hasArchive;
+  Program(this.title, this.startRaw, this.start, this.end, this.hasArchive);
+  int get durationMin => end.difference(start).inMinutes;
 }
 
 /// App-Einstellungen (persistiert).

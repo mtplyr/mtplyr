@@ -176,7 +176,7 @@ class HomeScreen extends StatelessWidget {
         _Tile('Live-TV', 'Fernsehen live', Icons.live_tv_rounded, const Color(0xFF6FB1F2), () => _open(c, const LiveScreen())),
         _Tile('Filme', 'Spielfilme', Icons.movie_creation_rounded, const Color(0xFF8FA6F0), () => _open(c, const CatalogScreen(title: 'Filme', type: 'vod'))),
         _Tile('Serien', 'Serien & Staffeln', Icons.theaters_rounded, const Color(0xFF6FD0C8), () => _open(c, const CatalogScreen(title: 'Serien', type: 'series'))),
-        _Tile('Replay', 'Live-Sender', Icons.replay_rounded, const Color(0xFFE0B366), () => _open(c, const LiveScreen())),
+        _Tile('Replay', 'Verpasstes nachholen', Icons.replay_rounded, const Color(0xFFE0B366), () => _open(c, const LiveScreen(catchup: true))),
       ];
 
   @override
@@ -265,7 +265,8 @@ Widget _empty(String t) => Center(child: Text(t, style: const TextStyle(color: k
 
 // ============================ LIVE ============================
 class LiveScreen extends StatefulWidget {
-  const LiveScreen({super.key});
+  final bool catchup; // true = Replay: Sender antippen -> vergangene Sendungen
+  const LiveScreen({super.key, this.catchup = false});
   @override
   State<LiveScreen> createState() => _LiveScreenState();
 }
@@ -315,7 +316,7 @@ class _LiveScreenState extends State<LiveScreen> {
   Widget build(BuildContext context) {
     final narrow = _narrow(context);
     return Scaffold(
-      appBar: _subBar(context, 'Live-Sender'),
+      appBar: _subBar(context, widget.catchup ? 'Replay – Sender wählen' : 'Live-Sender'),
       body: Container(
         decoration: _bgDeco(),
         child: loadingCats
@@ -396,10 +397,12 @@ class _LiveScreenState extends State<LiveScreen> {
                   final ch = items[i];
                   final fav = FavStore.isFav(ch.id);
                   return GestureDetector(
-                    onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(
-                          title: ch.name, url: Xtream.liveUrl(ch.id),
-                          channels: items, index: i, urlFor: (c) => Xtream.liveUrl(c.id),
-                        ))),
+                    onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => widget.catchup
+                        ? CatchupProgramsScreen(streamId: ch.id, name: ch.name)
+                        : PlayerScreen(
+                            title: ch.name, url: Xtream.liveUrl(ch.id),
+                            channels: items, index: i, urlFor: (c) => Xtream.liveUrl(c.id),
+                          ))),
                     child: Container(
                       margin: const EdgeInsets.symmetric(vertical: 3),
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -895,6 +898,80 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
   }
 }
 
+// ============================ CATCH-UP: vergangene Sendungen eines Senders ============================
+class CatchupProgramsScreen extends StatefulWidget {
+  final String streamId, name;
+  const CatchupProgramsScreen({super.key, required this.streamId, required this.name});
+  @override
+  State<CatchupProgramsScreen> createState() => _CatchupProgramsScreenState();
+}
+
+class _CatchupProgramsScreenState extends State<CatchupProgramsScreen> {
+  List<Program> progs = [];
+  bool loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final all = await Xtream.archive(widget.streamId);
+      final now = DateTime.now();
+      progs = all.where((p) => p.end.isBefore(now)).toList()..sort((a, b) => b.start.compareTo(a.start));
+    } catch (_) {}
+    if (mounted) setState(() => loading = false);
+  }
+
+  String _fmt(DateTime d) {
+    String two(int x) => x.toString().padLeft(2, '0');
+    return '${two(d.day)}.${two(d.month)}. ${two(d.hour)}:${two(d.minute)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: _subBar(context, widget.name),
+      body: Container(
+        decoration: _bgDeco(),
+        child: SafeArea(
+          child: loading
+              ? _loading()
+              : progs.isEmpty
+                  ? _empty('Keine aufgezeichneten Sendungen für diesen Sender')
+                  : ListView.builder(
+                      padding: const EdgeInsets.all(14),
+                      itemCount: progs.length,
+                      itemBuilder: (c, i) {
+                        final p = progs[i];
+                        return GestureDetector(
+                          onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(title: '${widget.name} · ${p.title}', url: Xtream.timeshiftUrl(widget.streamId, p)))),
+                          child: Container(
+                            margin: const EdgeInsets.symmetric(vertical: 4),
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            decoration: BoxDecoration(color: kPanel.withValues(alpha: .5), borderRadius: BorderRadius.circular(10), border: Border.all(color: kLine)),
+                            child: Row(children: [
+                              const Icon(Icons.history_rounded, color: kBlue, size: 20),
+                              const SizedBox(width: 12),
+                              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Text(p.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kText, fontSize: 14, fontWeight: FontWeight.w600)),
+                                const SizedBox(height: 2),
+                                Text('${_fmt(p.start)} · ${p.durationMin} Min', style: const TextStyle(color: kMuted, fontSize: 12)),
+                              ])),
+                              const Icon(Icons.play_circle_outline_rounded, color: kMuted, size: 20),
+                            ]),
+                          ),
+                        );
+                      },
+                    ),
+        ),
+      ),
+    );
+  }
+}
+
 // ============================ PLAYER (Platzhalter – VLC im nativen Build) ============================
 class PlayerScreen extends StatefulWidget {
   final String title, url;
@@ -914,6 +991,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   late int idx = widget.index;
   String epg = '';
   StreamSubscription? _durSub;
+  StreamSubscription? _errSub;
   bool _seeked = false;
 
   @override
@@ -921,6 +999,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
     super.initState();
     player.open(Media(widget.url));
     _loadEpg();
+    _errSub = player.stream.error.listen((e) {
+      if (mounted && e.trim().isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          backgroundColor: kPanel,
+          content: const Text('Wiedergabe nicht möglich – Sendung evtl. noch nicht im Archiv verfügbar.', style: TextStyle(color: kText)),
+          duration: const Duration(seconds: 4),
+        ));
+      }
+    });
     if (widget.resume) {
       _durSub = player.stream.duration.listen((d) {
         if (!_seeked && d > Duration.zero) {
@@ -946,6 +1033,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       ResumeStore.set(widget.url, player.state.position.inSeconds, player.state.duration.inSeconds);
     }
     _durSub?.cancel();
+    _errSub?.cancel();
     player.dispose();
     super.dispose();
   }
@@ -1076,7 +1164,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             padding: const EdgeInsets.all(16),
             child: narrow
                 ? ListView(children: [list, const SizedBox(height: 16), _detail()])
-                : Row(crossAxisAlignment: CrossAxisAlignment.start, children: [Expanded(child: list), const SizedBox(width: 16), Expanded(flex: 2, child: _detail())]),
+                : Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [Expanded(child: SingleChildScrollView(child: list)), const SizedBox(width: 16), Expanded(flex: 2, child: _detail())]),
           ),
         ),
       ),
@@ -1224,6 +1312,21 @@ class _HiddenCatsState extends State<_HiddenCats> {
 
   @override
   Widget build(BuildContext context) {
+    final Widget body = loading
+        ? _loading()
+        : ListView.builder(
+            padding: const EdgeInsets.only(bottom: 8),
+            itemCount: cats.length,
+            itemBuilder: (c, i) {
+              final name = cats[i].name;
+              final hidden = Prefs.hidden.contains(name);
+              return ListTile(
+                dense: true,
+                title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kText, fontSize: 13.5)),
+                trailing: Switch(value: !hidden, activeThumbColor: kBlue, onChanged: (v) async { await Prefs.toggleHidden(name); if (mounted) setState(() {}); }),
+              );
+            },
+          );
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(color: kPanel.withValues(alpha: .5), borderRadius: BorderRadius.circular(14), border: Border.all(color: kLine)),
@@ -1246,24 +1349,7 @@ class _HiddenCatsState extends State<_HiddenCats> {
             ),
         ]),
         const SizedBox(height: 10),
-        SizedBox(
-          height: (MediaQuery.of(context).size.height * 0.6).clamp(160.0, 520.0),
-          child: loading
-              ? _loading()
-              : ListView.builder(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  itemCount: cats.length,
-                  itemBuilder: (c, i) {
-                    final name = cats[i].name;
-                    final hidden = Prefs.hidden.contains(name);
-                    return ListTile(
-                      dense: true,
-                      title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kText, fontSize: 13.5)),
-                      trailing: Switch(value: !hidden, activeThumbColor: kBlue, onChanged: (v) async { await Prefs.toggleHidden(name); if (mounted) setState(() {}); }),
-                    );
-                  },
-                ),
-        ),
+        _narrow(context) ? SizedBox(height: 300, child: body) : Expanded(child: body),
       ]),
     );
   }
