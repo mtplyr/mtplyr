@@ -1,5 +1,6 @@
 package com.vela.velaplayer
 
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 
-class MainActivity : FlutterActivity()
+// FragmentActivity statt FlutterActivity – von local_auth (Biometrie) benötigt.
+class MainActivity : FlutterFragmentActivity()

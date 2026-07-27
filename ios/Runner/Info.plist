@@ -53,6 +53,8 @@
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
 	<string>Main</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Vela nutzt Face ID, um die Kindersicherung zu entsperren.</string>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationLandscapeLeft</string>

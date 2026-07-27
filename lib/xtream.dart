@@ -266,8 +266,14 @@ class Prefs {
   static bool hideAdult = false;
   static Set<String> hidden = {};
   static String? pinHash;
+  static int bufferIdx = 1; // 0 niedrig, 1 standard, 2 hoch, 3 extrem
+  static int subIdx = 1; // 0 groß, 1 normal, 2 klein
+  static bool useFaceId = false;
 
   static const _adult = ['XXX', 'ADULT', '+18', '18+', 'EROTIC', 'EROTIK', 'PORN', 'PORNO', 'FSK18', 'NIGHT CLUB'];
+
+  static int get bufferBytes => const [8, 32, 64, 128][bufferIdx.clamp(0, 3)] * 1024 * 1024;
+  static double get subScale => const [1.6, 1.0, 0.7][subIdx.clamp(0, 2)];
 
   static Future<void> load() async {
     final p = await SharedPreferences.getInstance();
@@ -275,12 +281,18 @@ class Prefs {
     hideAdult = p.getBool('hide_adult') ?? false;
     hidden = (p.getStringList('hidden_cats') ?? []).toSet();
     pinHash = p.getString('pin_hash');
+    bufferIdx = p.getInt('buffer_idx') ?? 1;
+    subIdx = p.getInt('sub_idx') ?? 1;
+    useFaceId = p.getBool('use_faceid') ?? false;
   }
 
   static Future<void> _p(Function(SharedPreferences) f) async => f(await SharedPreferences.getInstance());
 
   static Future<void> setLiveExt(String v) async { liveExt = v; await _p((p) => p.setString('live_ext', v)); }
   static Future<void> setHideAdult(bool v) async { hideAdult = v; await _p((p) => p.setBool('hide_adult', v)); }
+  static Future<void> setBufferIdx(int v) async { bufferIdx = v; await _p((p) => p.setInt('buffer_idx', v)); }
+  static Future<void> setSubIdx(int v) async { subIdx = v; await _p((p) => p.setInt('sub_idx', v)); }
+  static Future<void> setUseFaceId(bool v) async { useFaceId = v; await _p((p) => p.setBool('use_faceid', v)); }
   static Future<void> toggleHidden(String name) async {
     hidden.contains(name) ? hidden.remove(name) : hidden.add(name);
     await _p((p) => p.setStringList('hidden_cats', hidden.toList()));

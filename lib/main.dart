@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:local_auth/local_auth.dart';
 import 'xtream.dart';
 
 void main() async {
@@ -985,7 +986,7 @@ class PlayerScreen extends StatefulWidget {
 }
 
 class _PlayerScreenState extends State<PlayerScreen> {
-  late final Player player = Player();
+  late final Player player = Player(configuration: PlayerConfiguration(bufferSize: Prefs.bufferBytes));
   late final VideoController controller = VideoController(player);
   late String title = widget.title;
   late int idx = widget.index;
@@ -994,10 +995,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
   StreamSubscription? _errSub;
   bool _seeked = false;
 
+  Future<void> _applySubScale() async {
+    try { await (player.platform as dynamic).setProperty('sub-scale', Prefs.subScale.toStringAsFixed(2)); } catch (_) {}
+  }
+
   @override
   void initState() {
     super.initState();
     player.open(Media(widget.url));
+    _applySubScale();
     _loadEpg();
     _errSub = player.stream.error.listen((e) {
       if (mounted && e.trim().isNotEmpty) {
@@ -1134,7 +1140,7 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   int sel = 0;
-  final items = const ['Stream-Format', 'Kindersicherung', 'Versteckte Kategorien', 'Favoriten', 'Über Vela'];
+  final items = const ['Stream-Format', 'Puffergröße', 'Untertitelgröße', 'Kindersicherung', 'Versteckte Kategorien', 'Favoriten', 'Über Vela'];
 
   @override
   Widget build(BuildContext context) {
@@ -1181,12 +1187,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget _detail() {
     switch (sel) {
       case 0: return _streamFormat();
-      case 1: return _parental();
-      case 2: return const _HiddenCats();
-      case 3: return _favs();
+      case 1: return _buffer();
+      case 2: return _subs();
+      case 3: return _parental();
+      case 4: return const _HiddenCats();
+      case 5: return _favs();
       default: return _about();
     }
   }
+
+  Widget _buffer() => _panel(Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+        const Text('Puffergröße', style: TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 4),
+        const Text('Wie viel Video vorab geladen wird. Bei Rucklern/Nachladen: höher stellen.', style: TextStyle(color: kMuted, fontSize: 12.5)),
+        const SizedBox(height: 14),
+        for (final o in const [[0, 'Niedrig'], [1, 'Standard'], [2, 'Hoch'], [3, 'Extrem']])
+          _opt(o[1] as String, Prefs.bufferIdx == o[0], () { Prefs.setBufferIdx(o[0] as int); setState(() {}); }),
+      ]));
+
+  Widget _subs() => _panel(Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+        const Text('Untertitelgröße', style: TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 4),
+        const Text('Wie groß Untertitel angezeigt werden.', style: TextStyle(color: kMuted, fontSize: 12.5)),
+        const SizedBox(height: 14),
+        for (final o in const [[0, 'Groß'], [1, 'Normal'], [2, 'Klein']])
+          _opt(o[1] as String, Prefs.subIdx == o[0], () { Prefs.setSubIdx(o[0] as int); setState(() {}); }),
+      ]));
 
   Widget _streamFormat() => _panel(Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
         const Text('Stream-Format (Live)', style: TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w700)),
@@ -1222,11 +1248,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
           icon: const Icon(Icons.lock_rounded, size: 18, color: kBlue),
           label: Text(Prefs.hasPin ? 'PIN ändern' : 'PIN festlegen', style: const TextStyle(color: kBlue)),
         ),
+        const SizedBox(height: 12),
+        Row(children: [
+          const Expanded(child: Text('Face ID / Touch ID verwenden', style: TextStyle(color: kText, fontSize: 14))),
+          Switch(
+            value: Prefs.useFaceId,
+            activeThumbColor: kBlue,
+            onChanged: (v) async {
+              if (v) { final ok = await _bioAuth('Face ID / Touch ID aktivieren'); if (!ok) return; }
+              await Prefs.setUseFaceId(v);
+              setState(() {});
+            },
+          ),
+        ]),
       ]));
 
+  Future<bool> _bioAuth(String reason) async {
+    try {
+      final auth = LocalAuthentication();
+      final can = await auth.isDeviceSupported();
+      if (!can) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(backgroundColor: kPanel, content: Text('Keine Biometrie auf diesem Gerät verfügbar.', style: TextStyle(color: kText))));
+        return false;
+      }
+      return await auth.authenticate(localizedReason: reason, biometricOnly: false, persistAcrossBackgrounding: true);
+    } catch (_) {
+      return false;
+    }
+  }
+
   void _toggleAdult(bool v) async {
-    if (!v && Prefs.hasPin) {
-      final ok = await _askPin('PIN zum Freigeben');
+    if (!v && (Prefs.hasPin || Prefs.useFaceId)) {
+      final ok = Prefs.useFaceId ? await _bioAuth('Zum Freigeben authentifizieren') : await _askPin('PIN zum Freigeben');
       if (!ok) return;
     }
     await Prefs.setHideAdult(v);
