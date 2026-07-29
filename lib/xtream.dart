@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:ui' show PlatformDispatcher;
 import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -234,7 +235,7 @@ class Xtream {
           seasons[season.toString()] = eps
               .map((e) => Episode(
                     e['id'].toString(),
-                    (e['title'] ?? 'Folge ${e['episode_num'] ?? ''}').toString(),
+                    (e['title'] ?? 'Ep. ${e['episode_num'] ?? ''}').toString(),
                     (e['container_extension'] ?? 'mp4').toString(),
                     int.tryParse('${e['episode_num']}') ?? 0,
                   ))
@@ -269,6 +270,7 @@ class Prefs {
   static int bufferIdx = 1; // 0 niedrig, 1 standard, 2 hoch, 3 extrem
   static int subIdx = 1; // 0 groß, 1 normal, 2 klein
   static bool useFaceId = false;
+  static String lang = 'de'; // App-Sprache
 
   static const _adult = ['XXX', 'ADULT', '+18', '18+', 'EROTIC', 'EROTIK', 'PORN', 'PORNO', 'FSK18', 'NIGHT CLUB'];
 
@@ -284,6 +286,15 @@ class Prefs {
     bufferIdx = p.getInt('buffer_idx') ?? 1;
     subIdx = p.getInt('sub_idx') ?? 1;
     useFaceId = p.getBool('use_faceid') ?? false;
+    lang = p.getString('lang') ?? _deviceLang();
+  }
+
+  static const _supportedLangs = ['de', 'en', 'tr', 'ar', 'fr', 'it', 'el'];
+  static String _deviceLang() {
+    try {
+      final code = PlatformDispatcher.instance.locale.languageCode;
+      return _supportedLangs.contains(code) ? code : 'en';
+    } catch (_) { return 'en'; }
   }
 
   static Future<void> _p(Function(SharedPreferences) f) async => f(await SharedPreferences.getInstance());
@@ -293,6 +304,7 @@ class Prefs {
   static Future<void> setBufferIdx(int v) async { bufferIdx = v; await _p((p) => p.setInt('buffer_idx', v)); }
   static Future<void> setSubIdx(int v) async { subIdx = v; await _p((p) => p.setInt('sub_idx', v)); }
   static Future<void> setUseFaceId(bool v) async { useFaceId = v; await _p((p) => p.setBool('use_faceid', v)); }
+  static Future<void> setLang(String v) async { lang = v; await _p((p) => p.setString('lang', v)); }
   static Future<void> toggleHidden(String name) async {
     hidden.contains(name) ? hidden.remove(name) : hidden.add(name);
     await _p((p) => p.setStringList('hidden_cats', hidden.toList()));

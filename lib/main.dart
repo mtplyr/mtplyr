@@ -5,6 +5,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:local_auth/local_auth.dart';
 import 'xtream.dart';
+import 'l10n.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -32,11 +33,15 @@ class VelaApp extends StatelessWidget {
   const VelaApp({super.key});
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Vela',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(useMaterial3: true, brightness: Brightness.dark, scaffoldBackgroundColor: kBg, fontFamily: 'Roboto'),
-      home: Session.account == null ? const ConnectScreen() : const HomeScreen(),
+    return ValueListenableBuilder<int>(
+      valueListenable: langTick,
+      builder: (_, _, _) => MaterialApp(
+        key: ValueKey(Prefs.lang),
+        title: 'Vela',
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData(useMaterial3: true, brightness: Brightness.dark, scaffoldBackgroundColor: kBg, fontFamily: 'Roboto'),
+        home: Session.account == null ? const ConnectScreen() : const HomeScreen(),
+      ),
     );
   }
 }
@@ -99,7 +104,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
     final info = await Xtream.userInfo(a);
     if (!mounted) return;
     if (info == null) {
-      setState(() { busy = false; err = 'Verbindung fehlgeschlagen – Zugangsdaten prüfen.'; });
+      setState(() { busy = false; err = L.t('connect_err'); });
       return;
     }
     await Session.save(a);
@@ -124,13 +129,13 @@ class _ConnectScreenState extends State<ConnectScreen> {
                   padding: const EdgeInsets.all(22),
                   decoration: BoxDecoration(color: kPanel, borderRadius: BorderRadius.circular(16), border: Border.all(color: kLine)),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                    const Text('Playlist verbinden', style: TextStyle(color: kText, fontSize: 20, fontWeight: FontWeight.w700, fontFamily: 'serif')),
+                    Text(L.t('connect_title'), style: const TextStyle(color: kText, fontSize: 20, fontWeight: FontWeight.w700, fontFamily: 'serif')),
                     const SizedBox(height: 4),
-                    const Text('Gib deine Xtream-Zugangsdaten ein.', style: TextStyle(color: kMuted, fontSize: 13)),
+                    Text(L.t('connect_sub'), style: const TextStyle(color: kMuted, fontSize: 13)),
                     const SizedBox(height: 8),
-                    _field(host, 'Server (http://host:port)'),
-                    _field(user, 'Benutzername'),
-                    _field(pass, 'Passwort', obscure: true),
+                    _field(host, L.t('connect_server')),
+                    _field(user, L.t('username')),
+                    _field(pass, L.t('password'), obscure: true),
                     if (err != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(err!, style: const TextStyle(color: Color(0xFFF2A0A0), fontSize: 13))),
                     const SizedBox(height: 18),
                     SizedBox(
@@ -140,7 +145,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
                         onPressed: busy ? null : _connect,
                         child: busy
                             ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: kBg))
-                            : const Text('Verbinden', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                            : Text(L.t('connect_btn'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                       ),
                     ),
                   ]),
@@ -174,10 +179,10 @@ class HomeScreen extends StatelessWidget {
   void _open(BuildContext c, Widget s) => Navigator.of(c).push(MaterialPageRoute(builder: (_) => s));
 
   List<_Tile> _tiles(BuildContext c) => [
-        _Tile('Live-TV', 'Fernsehen live', Icons.live_tv_rounded, const Color(0xFF6FB1F2), () => _open(c, const LiveScreen())),
-        _Tile('Filme', 'Spielfilme', Icons.movie_creation_rounded, const Color(0xFF8FA6F0), () => _open(c, const CatalogScreen(title: 'Filme', type: 'vod'))),
-        _Tile('Serien', 'Serien & Staffeln', Icons.theaters_rounded, const Color(0xFF6FD0C8), () => _open(c, const CatalogScreen(title: 'Serien', type: 'series'))),
-        _Tile('Replay', 'Verpasstes nachholen', Icons.replay_rounded, const Color(0xFFE0B366), () => _open(c, const LiveScreen(catchup: true))),
+        _Tile(L.t('home_live'), L.t('home_live_sub'), Icons.live_tv_rounded, const Color(0xFF6FB1F2), () => _open(c, const LiveScreen())),
+        _Tile(L.t('home_movies'), L.t('home_movies_sub'), Icons.movie_creation_rounded, const Color(0xFF8FA6F0), () => _open(c, CatalogScreen(title: L.t('home_movies'), type: 'vod'))),
+        _Tile(L.t('home_series'), L.t('home_series_sub'), Icons.theaters_rounded, const Color(0xFF6FD0C8), () => _open(c, CatalogScreen(title: L.t('home_series'), type: 'series'))),
+        _Tile(L.t('home_replay'), L.t('home_replay_sub'), Icons.replay_rounded, const Color(0xFFE0B366), () => _open(c, const LiveScreen(catchup: true))),
       ];
 
   @override
@@ -291,10 +296,10 @@ class _LiveScreenState extends State<LiveScreen> {
     try {
       final c = await Xtream.categories('live');
       if (!mounted) return;
-      setState(() { cats = [Category('__fav__', '★ Favoriten'), ...c]; loadingCats = false; });
+      setState(() { cats = [Category('__fav__', '★ ${L.t('favorites')}'), ...c]; loadingCats = false; });
       _selectCat(cats.length > 1 ? 1 : 0);
     } catch (e) {
-      if (mounted) setState(() { loadingCats = false; error = 'Fehler beim Laden.'; });
+      if (mounted) setState(() { loadingCats = false; error = L.t('err_load'); });
     }
   }
 
@@ -317,7 +322,7 @@ class _LiveScreenState extends State<LiveScreen> {
   Widget build(BuildContext context) {
     final narrow = _narrow(context);
     return Scaffold(
-      appBar: _subBar(context, widget.catchup ? 'Replay – Sender wählen' : 'Live-Sender'),
+      appBar: _subBar(context, widget.catchup ? L.t('replay_pick') : L.t('live_title')),
       body: Container(
         decoration: _bgDeco(),
         child: loadingCats
@@ -379,7 +384,7 @@ class _LiveScreenState extends State<LiveScreen> {
           onChanged: (v) => setState(() => query = v),
           style: const TextStyle(color: kText, fontSize: 14),
           decoration: InputDecoration(
-            isDense: true, hintText: 'In Kategorie suchen…', hintStyle: const TextStyle(color: kMuted, fontSize: 13),
+            isDense: true, hintText: L.t('search_in_cat'), hintStyle: const TextStyle(color: kMuted, fontSize: 13),
             prefixIcon: const Icon(Icons.search_rounded, color: kMuted, size: 18),
             filled: true, fillColor: kPanel2,
             contentPadding: const EdgeInsets.symmetric(vertical: 10),
@@ -390,7 +395,7 @@ class _LiveScreenState extends State<LiveScreen> {
       ),
       Expanded(
         child: items.isEmpty
-            ? _empty(cats[catSel].id == '__fav__' ? 'Noch keine Favoriten' : 'Keine Treffer')
+            ? _empty(cats[catSel].id == '__fav__' ? L.t('no_fav') : L.t('no_hits'))
             : ListView.builder(
                 padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
                 itemCount: items.length,
@@ -488,7 +493,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
         child: loadingCats
             ? _loading()
             : cats.isEmpty
-                ? _empty('Keine Inhalte')
+                ? _empty(L.t('no_content'))
                 : narrow
                     ? Column(children: [_catBar(), Expanded(child: _grid())])
                     : Row(children: [SizedBox(width: 240, child: _sidebar()), Expanded(child: _grid())]),
@@ -543,7 +548,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
           onChanged: (v) => setState(() => query = v),
           style: const TextStyle(color: kText, fontSize: 14),
           decoration: InputDecoration(
-            isDense: true, hintText: 'In Kategorie suchen…', hintStyle: const TextStyle(color: kMuted, fontSize: 13),
+            isDense: true, hintText: L.t('search_in_cat'), hintStyle: const TextStyle(color: kMuted, fontSize: 13),
             prefixIcon: const Icon(Icons.search_rounded, color: kMuted, size: 18),
             filled: true, fillColor: kPanel2,
             contentPadding: const EdgeInsets.symmetric(vertical: 10),
@@ -554,7 +559,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
       ),
       Expanded(
         child: list.isEmpty
-            ? _empty('Keine Treffer')
+            ? _empty(L.t('no_hits'))
             : LayoutBuilder(builder: (c, cons) {
                 final cols = (cons.maxWidth / 130).floor().clamp(2, 8);
                 return GridView.builder(
@@ -622,7 +627,7 @@ class _SearchScreenState extends State<SearchScreen> {
     final src = tab == 0 ? vod : series;
     final results = query.length < 2 ? <Item>[] : src.where((e) => e.name.toLowerCase().contains(query.toLowerCase())).take(80).toList();
     return Scaffold(
-      appBar: _subBar(context, 'Suche'),
+      appBar: _subBar(context, L.t('search_title')),
       body: Container(
         decoration: _bgDeco(),
         child: SafeArea(
@@ -634,7 +639,7 @@ class _SearchScreenState extends State<SearchScreen> {
                 onChanged: (v) => setState(() => query = v),
                 style: const TextStyle(color: kText),
                 decoration: InputDecoration(
-                  hintText: 'Film oder Serie suchen…', hintStyle: const TextStyle(color: kMuted),
+                  hintText: L.t('search_hint'), hintStyle: const TextStyle(color: kMuted),
                   prefixIcon: const Icon(Icons.search_rounded, color: kMuted),
                   filled: true, fillColor: kPanel2,
                   enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: kLine)),
@@ -643,7 +648,7 @@ class _SearchScreenState extends State<SearchScreen> {
               ),
               const SizedBox(height: 10),
               Row(children: [
-                for (final t in const [[0, 'Filme'], [1, 'Serien']])
+                for (final t in [[0, L.t('home_movies')], [1, L.t('home_series')]])
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
                     child: GestureDetector(
@@ -661,9 +666,9 @@ class _SearchScreenState extends State<SearchScreen> {
                 child: loading
                     ? _loading()
                     : query.length < 2
-                        ? _empty('Mindestens 2 Zeichen eingeben')
+                        ? _empty(L.t('search_min2'))
                         : results.isEmpty
-                            ? _empty('Keine Treffer')
+                            ? _empty(L.t('no_hits'))
                             : LayoutBuilder(builder: (c, cons) {
                                 final cols = (cons.maxWidth / 130).floor().clamp(2, 8);
                                 return GridView.builder(
@@ -761,7 +766,7 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                       const SizedBox(height: 10),
                       if (meta.isNotEmpty) Text(meta.join('   ·   '), style: const TextStyle(color: kBlue, fontSize: 13, fontWeight: FontWeight.w600)),
                       const SizedBox(height: 16),
-                      Expanded(child: SingleChildScrollView(child: Text(plot.isEmpty ? 'Keine Beschreibung verfügbar.' : plot, style: const TextStyle(color: kMuted, fontSize: 14, height: 1.5)))),
+                      Expanded(child: SingleChildScrollView(child: Text(plot.isEmpty ? L.t('no_desc') : plot, style: const TextStyle(color: kMuted, fontSize: 14, height: 1.5)))),
                       const SizedBox(height: 16),
                       SizedBox(
                         width: 220, height: 52,
@@ -769,7 +774,7 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                           style: FilledButton.styleFrom(backgroundColor: kBlue, foregroundColor: kBg, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
                           onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(title: widget.item.name, url: Xtream.vodUrl(widget.item.id, ext), resume: true))),
                           icon: const Icon(Icons.play_arrow_rounded),
-                          label: const Text('Abspielen', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                          label: Text(L.t('play'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                         ),
                       ),
                     ]),
@@ -859,7 +864,7 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
                                 child: Container(
                                   alignment: Alignment.center, padding: const EdgeInsets.symmetric(horizontal: 16),
                                   decoration: BoxDecoration(color: s ? kBlue : kPanel2, borderRadius: BorderRadius.circular(19), border: Border.all(color: s ? kBlue : kLine)),
-                                  child: Text('Staffel ${seasons[i]}', style: TextStyle(color: s ? kBg : kMuted, fontWeight: FontWeight.w600, fontSize: 12.5)),
+                                  child: Text('${L.t('season')} ${seasons[i]}', style: TextStyle(color: s ? kBg : kMuted, fontWeight: FontWeight.w600, fontSize: 12.5)),
                                 ),
                               );
                             },
@@ -868,7 +873,7 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
                       const SizedBox(height: 10),
                       Expanded(
                         child: eps.isEmpty
-                            ? _empty('Keine Folgen')
+                            ? _empty(L.t('no_eps'))
                             : ListView.builder(
                                 itemCount: eps.length,
                                 itemBuilder: (c, i) {
@@ -941,7 +946,7 @@ class _CatchupProgramsScreenState extends State<CatchupProgramsScreen> {
           child: loading
               ? _loading()
               : progs.isEmpty
-                  ? _empty('Keine aufgezeichneten Sendungen für diesen Sender')
+                  ? _empty(L.t('catchup_none'))
                   : ListView.builder(
                       padding: const EdgeInsets.all(14),
                       itemCount: progs.length,
@@ -959,7 +964,7 @@ class _CatchupProgramsScreenState extends State<CatchupProgramsScreen> {
                               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                                 Text(p.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kText, fontSize: 14, fontWeight: FontWeight.w600)),
                                 const SizedBox(height: 2),
-                                Text('${_fmt(p.start)} · ${p.durationMin} Min', style: const TextStyle(color: kMuted, fontSize: 12)),
+                                Text('${_fmt(p.start)} · ${p.durationMin} ${L.t('minutes_short')}', style: const TextStyle(color: kMuted, fontSize: 12)),
                               ])),
                               const Icon(Icons.play_circle_outline_rounded, color: kMuted, size: 20),
                             ]),
@@ -1009,7 +1014,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (mounted && e.trim().isNotEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           backgroundColor: kPanel,
-          content: const Text('Wiedergabe nicht möglich – Sendung evtl. noch nicht im Archiv verfügbar.', style: TextStyle(color: kText)),
+          content: Text(L.t('player_err'), style: const TextStyle(color: kText)),
           duration: const Duration(seconds: 4),
         ));
       }
@@ -1062,8 +1067,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (_) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Padding(padding: const EdgeInsets.all(16), child: Text(audio ? 'Audiospur wählen' : 'Untertitel wählen', style: const TextStyle(color: kText, fontWeight: FontWeight.w700, fontSize: 16))),
-          if (list.isEmpty) const Padding(padding: EdgeInsets.only(bottom: 20), child: Text('Keine Spuren verfügbar', style: TextStyle(color: kMuted))),
+          Padding(padding: const EdgeInsets.all(16), child: Text(audio ? L.t('pick_audio') : L.t('pick_subs'), style: const TextStyle(color: kText, fontWeight: FontWeight.w700, fontSize: 16))),
+          if (list.isEmpty) Padding(padding: const EdgeInsets.only(bottom: 20), child: Text(L.t('no_tracks'), style: const TextStyle(color: kMuted))),
           Flexible(
             child: ListView(shrinkWrap: true, children: [
               for (final t in list)
@@ -1111,7 +1116,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         Expanded(
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontFamily: 'serif', fontSize: 18)),
-            if (epg.isNotEmpty) Text('Jetzt: $epg', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kBlue, fontSize: 11.5, fontWeight: FontWeight.w500)),
+            if (epg.isNotEmpty) Text('${L.t('now')}: $epg', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kBlue, fontSize: 11.5, fontWeight: FontWeight.w500)),
           ]),
         ),
         if (live) MaterialCustomButton(onPressed: () => _zap(-1), icon: const Icon(Icons.skip_previous_rounded, color: Colors.white)),
@@ -1140,7 +1145,7 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   int sel = 0;
-  final items = const ['Stream-Format', 'Puffergröße', 'Untertitelgröße', 'Kindersicherung', 'Versteckte Kategorien', 'Favoriten', 'Über Vela'];
+  List<String> get items => [L.t('s_stream_format'), L.t('s_buffer'), L.t('s_subsize'), L.t('s_language'), L.t('s_parental'), L.t('s_hidden'), L.t('favorites'), L.t('s_about')];
 
   @override
   Widget build(BuildContext context) {
@@ -1162,7 +1167,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
     return Scaffold(
-      appBar: _subBar(context, 'Einstellungen'),
+      appBar: _subBar(context, L.t('settings_title')),
       body: Container(
         decoration: _bgDeco(),
         child: SafeArea(
@@ -1189,38 +1194,61 @@ class _SettingsScreenState extends State<SettingsScreen> {
       case 0: return _streamFormat();
       case 1: return _buffer();
       case 2: return _subs();
-      case 3: return _parental();
-      case 4: return const _HiddenCats();
-      case 5: return _favs();
+      case 3: return _language();
+      case 4: return _parental();
+      case 5: return const _HiddenCats();
+      case 6: return _favs();
       default: return _about();
     }
   }
 
   Widget _buffer() => _panel(Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-        const Text('Puffergröße', style: TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w700)),
+        Text(L.t('s_buffer'), style: const TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w700)),
         const SizedBox(height: 4),
-        const Text('Wie viel Video vorab geladen wird. Bei Rucklern/Nachladen: höher stellen.', style: TextStyle(color: kMuted, fontSize: 12.5)),
+        Text(L.t('buffer_desc'), style: const TextStyle(color: kMuted, fontSize: 12.5)),
         const SizedBox(height: 14),
-        for (final o in const [[0, 'Niedrig'], [1, 'Standard'], [2, 'Hoch'], [3, 'Extrem']])
+        for (final o in [[0, L.t('buf_low')], [1, L.t('buf_default')], [2, L.t('buf_high')], [3, L.t('buf_extreme')]])
           _opt(o[1] as String, Prefs.bufferIdx == o[0], () { Prefs.setBufferIdx(o[0] as int); setState(() {}); }),
       ]));
 
   Widget _subs() => _panel(Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-        const Text('Untertitelgröße', style: TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w700)),
+        Text(L.t('s_subsize'), style: const TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w700)),
         const SizedBox(height: 4),
-        const Text('Wie groß Untertitel angezeigt werden.', style: TextStyle(color: kMuted, fontSize: 12.5)),
+        Text(L.t('subs_desc'), style: const TextStyle(color: kMuted, fontSize: 12.5)),
         const SizedBox(height: 14),
-        for (final o in const [[0, 'Groß'], [1, 'Normal'], [2, 'Klein']])
+        for (final o in [[0, L.t('sub_large')], [1, L.t('sub_normal')], [2, L.t('sub_small')]])
           _opt(o[1] as String, Prefs.subIdx == o[0], () { Prefs.setSubIdx(o[0] as int); setState(() {}); }),
       ]));
 
-  Widget _streamFormat() => _panel(Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-        const Text('Stream-Format (Live)', style: TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w700)),
+  Widget _language() {
+    final body = ListView(
+      padding: const EdgeInsets.only(bottom: 4),
+      children: [
+        for (final l in kLangs)
+          _opt(l[1], Prefs.lang == l[0], () async { await L.set(l[0]); setState(() {}); }),
+      ],
+    );
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(color: kPanel.withValues(alpha: .5), borderRadius: BorderRadius.circular(14), border: Border.all(color: kLine)),
+      padding: const EdgeInsets.all(18),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(L.t('s_language'), style: const TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w700)),
         const SizedBox(height: 4),
-        const Text('Falls ein Sender nicht startet, das andere Format probieren.', style: TextStyle(color: kMuted, fontSize: 12.5)),
+        Text(L.t('lang_desc'), style: const TextStyle(color: kMuted, fontSize: 12.5)),
         const SizedBox(height: 14),
-        _opt('TS (Standard)', Prefs.liveExt == 'ts', () { Prefs.setLiveExt('ts'); setState(() {}); }),
-        _opt('HLS (m3u8)', Prefs.liveExt == 'm3u8', () { Prefs.setLiveExt('m3u8'); setState(() {}); }),
+        _narrow(context) ? SizedBox(height: 320, child: body) : Expanded(child: body),
+      ]),
+    );
+  }
+
+  Widget _streamFormat() => _panel(Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+        Text(L.t('sf_title'), style: const TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 4),
+        Text(L.t('sf_desc'), style: const TextStyle(color: kMuted, fontSize: 12.5)),
+        const SizedBox(height: 14),
+        _opt(L.t('sf_ts'), Prefs.liveExt == 'ts', () { Prefs.setLiveExt('ts'); setState(() {}); }),
+        _opt(L.t('sf_hls'), Prefs.liveExt == 'm3u8', () { Prefs.setLiveExt('m3u8'); setState(() {}); }),
       ]));
 
   Widget _opt(String label, bool on, VoidCallback onTap) => GestureDetector(
@@ -1233,12 +1261,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
       );
 
   Widget _parental() => _panel(Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-        const Text('Kindersicherung', style: TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w700)),
+        Text(L.t('s_parental'), style: const TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w700)),
         const SizedBox(height: 4),
-        const Text('Blendet XXX-/18+-Kategorien überall aus.', style: TextStyle(color: kMuted, fontSize: 12.5)),
+        Text(L.t('parental_desc'), style: const TextStyle(color: kMuted, fontSize: 12.5)),
         const SizedBox(height: 10),
         Row(children: [
-          const Expanded(child: Text('Erwachsenen-Inhalte ausblenden', style: TextStyle(color: kText, fontSize: 14))),
+          Expanded(child: Text(L.t('hide_adult'), style: const TextStyle(color: kText, fontSize: 14))),
           Switch(value: Prefs.hideAdult, activeThumbColor: kBlue, onChanged: _toggleAdult),
         ]),
         const SizedBox(height: 6),
@@ -1246,16 +1274,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
           style: OutlinedButton.styleFrom(side: const BorderSide(color: kLine)),
           onPressed: _pinDialog,
           icon: const Icon(Icons.lock_rounded, size: 18, color: kBlue),
-          label: Text(Prefs.hasPin ? 'PIN ändern' : 'PIN festlegen', style: const TextStyle(color: kBlue)),
+          label: Text(Prefs.hasPin ? L.t('change_pin') : L.t('set_pin'), style: const TextStyle(color: kBlue)),
         ),
         const SizedBox(height: 12),
         Row(children: [
-          const Expanded(child: Text('Face ID / Touch ID verwenden', style: TextStyle(color: kText, fontSize: 14))),
+          Expanded(child: Text(L.t('use_bio'), style: const TextStyle(color: kText, fontSize: 14))),
           Switch(
             value: Prefs.useFaceId,
             activeThumbColor: kBlue,
             onChanged: (v) async {
-              if (v) { final ok = await _bioAuth('Face ID / Touch ID aktivieren'); if (!ok) return; }
+              if (v) { final ok = await _bioAuth(L.t('bio_enable')); if (!ok) return; }
               await Prefs.setUseFaceId(v);
               setState(() {});
             },
@@ -1268,7 +1296,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final auth = LocalAuthentication();
       final can = await auth.isDeviceSupported();
       if (!can) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(backgroundColor: kPanel, content: Text('Keine Biometrie auf diesem Gerät verfügbar.', style: TextStyle(color: kText))));
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(backgroundColor: kPanel, content: Text(L.t('bio_none'), style: const TextStyle(color: kText))));
         return false;
       }
       return await auth.authenticate(localizedReason: reason, biometricOnly: false, persistAcrossBackgrounding: true);
@@ -1279,7 +1307,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   void _toggleAdult(bool v) async {
     if (!v && (Prefs.hasPin || Prefs.useFaceId)) {
-      final ok = Prefs.useFaceId ? await _bioAuth('Zum Freigeben authentifizieren') : await _askPin('PIN zum Freigeben');
+      final ok = Prefs.useFaceId ? await _bioAuth(L.t('bio_release')) : await _askPin(L.t('pin_release'));
       if (!ok) return;
     }
     await Prefs.setHideAdult(v);
@@ -1292,11 +1320,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: kPanel,
-        title: const Text('PIN festlegen', style: TextStyle(color: kText)),
-        content: TextField(controller: c, keyboardType: TextInputType.number, obscureText: true, style: const TextStyle(color: kText), decoration: const InputDecoration(hintText: 'Mind. 4 Ziffern', hintStyle: TextStyle(color: kMuted))),
+        title: Text(L.t('set_pin'), style: const TextStyle(color: kText)),
+        content: TextField(controller: c, keyboardType: TextInputType.number, obscureText: true, style: const TextStyle(color: kText), decoration: InputDecoration(hintText: L.t('pin_min'), hintStyle: const TextStyle(color: kMuted))),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Abbrechen')),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Speichern')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(L.t('cancel'))),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: Text(L.t('save'))),
         ],
       ),
     );
@@ -1312,7 +1340,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         title: Text(title, style: const TextStyle(color: kText)),
         content: TextField(controller: c, keyboardType: TextInputType.number, obscureText: true, style: const TextStyle(color: kText), decoration: const InputDecoration(hintText: 'PIN', hintStyle: TextStyle(color: kMuted))),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Abbrechen')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(L.t('cancel'))),
           TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('OK')),
         ],
       ),
@@ -1321,9 +1349,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _favs() => _panel(Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-        const Text('Favoriten', style: TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w700)),
+        Text(L.t('favorites'), style: const TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w700)),
         const SizedBox(height: 4),
-        Text('${FavStore.items().length} gespeicherte Sender', style: const TextStyle(color: kMuted, fontSize: 12.5)),
+        Text('${FavStore.items().length} ${L.t('favs_saved')}', style: const TextStyle(color: kMuted, fontSize: 12.5)),
         const SizedBox(height: 14),
         OutlinedButton.icon(
           style: OutlinedButton.styleFrom(side: const BorderSide(color: kLine)),
@@ -1332,14 +1360,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
             if (mounted) setState(() {});
           },
           icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFF2A0A0), size: 18),
-          label: const Text('Alle Favoriten löschen', style: TextStyle(color: kText)),
+          label: Text(L.t('favs_clear'), style: const TextStyle(color: kText)),
         ),
       ]));
 
   Widget _about() => _panel(Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: const [
         Text('Vela Player', style: TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w700)),
         SizedBox(height: 8),
-        Text('Version 1.0 · Beta', style: TextStyle(color: kMuted, fontSize: 13)),
+        Text('Version 1.0.1 · Beta', style: TextStyle(color: kMuted, fontSize: 13)),
       ]));
 }
 
@@ -1385,10 +1413,10 @@ class _HiddenCatsState extends State<_HiddenCats> {
       decoration: BoxDecoration(color: kPanel.withValues(alpha: .5), borderRadius: BorderRadius.circular(14), border: Border.all(color: kLine)),
       padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('Versteckte Kategorien', style: TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w700)),
+        Text(L.t('s_hidden'), style: const TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w700)),
         const SizedBox(height: 10),
         Row(children: [
-          for (final t in const [['live', 'Live'], ['vod', 'Filme'], ['series', 'Serien']])
+          for (final t in [['live', L.t('type_live')], ['vod', L.t('home_movies')], ['series', L.t('home_series')]])
             Padding(
               padding: const EdgeInsets.only(right: 8),
               child: GestureDetector(
@@ -1441,17 +1469,17 @@ class _AccountScreenState extends State<AccountScreen> {
     final i = info ?? {};
     final status = (i['status'] ?? '').toString();
     final data = [
-      ['Benutzername', Session.account!.user, Icons.person_rounded, false],
-      ['Status', status.isEmpty ? '—' : status, Icons.cloud_done_rounded, status.toLowerCase() == 'active'],
-      ['Verbindungen', '${i['active_cons'] ?? 0} / ${i['max_connections'] ?? '?'}', Icons.link_rounded, false],
-      ['Läuft ab', _tsDate(i['exp_date']), Icons.event_rounded, false],
-      ['Testzugang', ('${i['is_trial']}' == '1') ? 'Ja' : 'Nein', Icons.verified_user_rounded, false],
-      ['Erstellt am', _tsDate(i['created_at']), Icons.calendar_month_rounded, false],
+      [L.t('username'), Session.account!.user, Icons.person_rounded, false],
+      [L.t('acc_status'), status.isEmpty ? '—' : status, Icons.cloud_done_rounded, status.toLowerCase() == 'active'],
+      [L.t('acc_connections'), '${i['active_cons'] ?? 0} / ${i['max_connections'] ?? '?'}', Icons.link_rounded, false],
+      [L.t('acc_expires'), _tsDate(i['exp_date']), Icons.event_rounded, false],
+      [L.t('acc_trial'), ('${i['is_trial']}' == '1') ? L.t('yes') : L.t('no'), Icons.verified_user_rounded, false],
+      [L.t('acc_created'), _tsDate(i['created_at']), Icons.calendar_month_rounded, false],
     ];
     final cols = _narrow(context) ? 1 : 2;
     return Scaffold(
-      appBar: _subBar(context, 'Playlist-Info', actions: [
-        TextButton.icon(onPressed: _logout, icon: const Icon(Icons.logout_rounded, color: kMuted, size: 18), label: const Text('Abmelden', style: TextStyle(color: kMuted))),
+      appBar: _subBar(context, L.t('account_title'), actions: [
+        TextButton.icon(onPressed: _logout, icon: const Icon(Icons.logout_rounded, color: kMuted, size: 18), label: Text(L.t('logout'), style: const TextStyle(color: kMuted))),
         const SizedBox(width: 8),
       ]),
       body: Container(
