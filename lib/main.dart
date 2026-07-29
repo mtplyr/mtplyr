@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
@@ -15,6 +16,7 @@ void main() async {
   await FavStore.load();
   await Prefs.load();
   await ResumeStore.load();
+  await ContinueStore.load();
   runApp(const VelaApp());
 }
 
@@ -63,12 +65,15 @@ class TvFocus extends StatefulWidget {
   State<TvFocus> createState() => _TvFocusState();
 }
 
+// Fokusrahmen nur auf Nicht-iOS (Fernbedienung/TV/Web). Am iPhone = reines Touch.
+final bool kTvRing = defaultTargetPlatform != TargetPlatform.iOS;
+
 class _TvFocusState extends State<TvFocus> {
   bool _f = false;
   @override
   Widget build(BuildContext context) {
     return FocusableActionDetector(
-      autofocus: widget.autofocus,
+      autofocus: kTvRing && widget.autofocus,
       onFocusChange: (v) { if (v != _f) setState(() => _f = v); },
       mouseCursor: SystemMouseCursors.click,
       actions: {
@@ -81,7 +86,7 @@ class _TvFocusState extends State<TvFocus> {
           duration: const Duration(milliseconds: 120),
           foregroundDecoration: BoxDecoration(
             borderRadius: BorderRadius.circular(widget.radius),
-            border: Border.all(color: _f ? kBlue : Colors.transparent, width: 2.5),
+            border: Border.all(color: (_f && kTvRing) ? kBlue : Colors.transparent, width: 2.5),
           ),
           child: widget.child,
         ),
@@ -213,9 +218,14 @@ class _ConnectScreenState extends State<ConnectScreen> {
 }
 
 // ============================ HOME ============================
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
-  void _open(BuildContext c, Widget s) => Navigator.of(c).push(MaterialPageRoute(builder: (_) => s));
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  void _open(BuildContext c, Widget s) => Navigator.of(c).push(MaterialPageRoute(builder: (_) => s)).then((_) { if (mounted) setState(() {}); });
 
   List<_Tile> _tiles(BuildContext c) => [
         _Tile(L.t('home_live'), L.t('home_live_sub'), Icons.live_tv_rounded, const Color(0xFF6FB1F2), () => _open(c, const LiveScreen())),
@@ -227,6 +237,7 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final narrow = _narrow(context);
+    final cont = ContinueStore.items();
     return Scaffold(
       body: Container(
         decoration: _bgDeco(),
@@ -244,12 +255,70 @@ class HomeScreen extends StatelessWidget {
                 _iconBox(Icons.person_rounded, onTap: () => _open(context, const AccountScreen())),
               ]),
               SizedBox(height: narrow ? 14 : 22),
+              if (cont.isNotEmpty) ...[
+                _continueRow(context, cont, narrow),
+                SizedBox(height: narrow ? 14 : 20),
+              ],
               Expanded(child: _grid(context, narrow)),
             ]),
           ),
         ),
       ),
     );
+  }
+
+  Widget _continueRow(BuildContext context, List<ContinueItem> items, bool narrow) {
+    final h = narrow ? 92.0 : 100.0;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+      Padding(
+        padding: const EdgeInsets.only(left: 4, bottom: 8),
+        child: Text(L.t('continue_watching'), style: const TextStyle(color: kText, fontSize: 15, fontWeight: FontWeight.w700, fontFamily: 'serif')),
+      ),
+      SizedBox(
+        height: h,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: items.length,
+          separatorBuilder: (_, _) => const SizedBox(width: 10),
+          itemBuilder: (ctx, i) {
+            final it = items[i];
+            return TvFocus(
+              radius: 12,
+              onTap: () {
+                Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(title: it.title, url: it.url, resume: true, poster: it.poster))).then((_) { if (mounted) setState(() {}); });
+              },
+              child: Container(
+                width: 250,
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: kPanel, borderRadius: BorderRadius.circular(12), border: Border.all(color: kLine)),
+                child: Row(children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      width: 56, height: double.infinity, color: kPanel2,
+                      child: it.poster.isEmpty
+                          ? const Icon(Icons.movie_rounded, color: kMuted, size: 22)
+                          : Image.network(it.poster, fit: BoxFit.cover, errorBuilder: (_, _, _) => const Icon(Icons.movie_rounded, color: kMuted, size: 22)),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(it.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kText, fontSize: 13, fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 8),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(3),
+                        child: LinearProgressIndicator(value: it.progress, minHeight: 4, backgroundColor: kLine, valueColor: const AlwaysStoppedAnimation(kBlue)),
+                      ),
+                    ]),
+                  ),
+                ]),
+              ),
+            );
+          },
+        ),
+      ),
+    ]);
   }
 
   Widget _grid(BuildContext context, bool narrow) {
@@ -821,9 +890,9 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                       SizedBox(
                         width: 220, height: 52,
                         child: FilledButton.icon(
-                          autofocus: true,
+                          autofocus: kTvRing,
                           style: FilledButton.styleFrom(backgroundColor: kBlue, foregroundColor: kBg, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                          onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(title: widget.item.name, url: Xtream.vodUrl(widget.item.id, ext), resume: true))),
+                          onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(title: widget.item.name, url: Xtream.vodUrl(widget.item.id, ext), resume: true, poster: cover))),
                           icon: const Icon(Icons.play_arrow_rounded),
                           label: Text(L.t('play'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                         ),
@@ -933,7 +1002,7 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
                                   return TvFocus(
                                     radius: 10,
                                     autofocus: i == 0,
-                                    onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(title: e.title, url: Xtream.seriesEpUrl(e.id, e.ext), resume: true))),
+                                    onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(title: e.title, url: Xtream.seriesEpUrl(e.id, e.ext), resume: true, poster: cover))),
                                     child: Container(
                                       margin: const EdgeInsets.symmetric(vertical: 4),
                                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -1041,7 +1110,8 @@ class PlayerScreen extends StatefulWidget {
   final int index;
   final String Function(Item)? urlFor;
   final bool resume; // Filme/Serien: Position merken & fortsetzen
-  const PlayerScreen({super.key, required this.title, required this.url, this.channels, this.index = 0, this.urlFor, this.resume = false});
+  final String poster; // fuer „Weiterschauen"
+  const PlayerScreen({super.key, required this.title, required this.url, this.channels, this.index = 0, this.urlFor, this.resume = false, this.poster = ''});
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
 }
@@ -1097,7 +1167,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void dispose() {
     if (widget.resume) {
-      ResumeStore.set(widget.url, player.state.position.inSeconds, player.state.duration.inSeconds);
+      final pos = player.state.position.inSeconds;
+      final dur = player.state.duration.inSeconds;
+      ResumeStore.set(widget.url, pos, dur);
+      ContinueStore.record(url: widget.url, title: widget.title, poster: widget.poster, pos: pos, dur: dur);
     }
     _durSub?.cancel();
     _errSub?.cancel();

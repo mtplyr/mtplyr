@@ -345,6 +345,48 @@ class ResumeStore {
   }
 }
 
+/// „Weiterschauen" – zuletzt angesehene Filme/Folgen mit Restposition (persistiert).
+class ContinueItem {
+  final String url, title, poster;
+  final int pos, dur;
+  ContinueItem(this.url, this.title, this.poster, this.pos, this.dur);
+  double get progress => dur > 0 ? (pos / dur).clamp(0.0, 1.0) : 0.0;
+}
+
+class ContinueStore {
+  static const _k = 'continue_v1';
+  static List<Map<String, dynamic>> _items = [];
+
+  static Future<void> load() async {
+    final p = await SharedPreferences.getInstance();
+    final s = p.getString(_k);
+    if (s != null) {
+      try { _items = (jsonDecode(s) as List).map((e) => Map<String, dynamic>.from(e)).toList(); } catch (_) {}
+    }
+  }
+
+  static List<ContinueItem> items() => _items
+      .map((e) => ContinueItem('${e['url']}', '${e['title']}', '${e['poster'] ?? ''}', e['pos'] ?? 0, e['dur'] ?? 0))
+      .toList();
+
+  static Future<void> record({required String url, required String title, required String poster, required int pos, required int dur}) async {
+    _items.removeWhere((e) => e['url'] == url);
+    // Nur merken, wenn mittendrin (nicht ganz am Anfang/Ende).
+    if (pos > 30 && (dur == 0 || pos < dur - 90)) {
+      _items.insert(0, {'url': url, 'title': title, 'poster': poster, 'pos': pos, 'dur': dur});
+      if (_items.length > 15) _items = _items.sublist(0, 15);
+    }
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_k, jsonEncode(_items));
+  }
+
+  static Future<void> remove(String url) async {
+    _items.removeWhere((e) => e['url'] == url);
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_k, jsonEncode(_items));
+  }
+}
+
 /// Lokale Favoriten-Sender (persistiert).
 class FavStore {
   static const _k = 'fav_live';

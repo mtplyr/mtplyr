@@ -5,13 +5,13 @@ import 'xtream.dart';
 /// Reihenfolge der Werte je Schlüssel: [de, en, tr, ar, fr, it, el].
 
 const List<List<String>> kLangs = [
-  ['de', 'Deutsch'],
-  ['en', 'English'],
-  ['tr', 'Türkçe'],
-  ['ar', 'العربية'],
-  ['fr', 'Français'],
-  ['it', 'Italiano'],
-  ['el', 'Ελληνικά'],
+  ['de', '🇩🇪  Deutsch'],
+  ['en', '🇬🇧  English'],
+  ['tr', '🇹🇷  Türkçe'],
+  ['ar', '🇸🇦  العربية'],
+  ['fr', '🇫🇷  Français'],
+  ['it', '🇮🇹  Italiano'],
+  ['el', '🇬🇷  Ελληνικά'],
 ];
 
 const List<String> _order = ['de', 'en', 'tr', 'ar', 'fr', 'it', 'el'];
@@ -134,6 +134,7 @@ class L {
     'acc_trial': ['Testzugang', 'Trial', 'Deneme', 'تجريبي', 'Essai', 'Prova', 'Δοκιμή'],
     'acc_created': ['Erstellt am', 'Created', 'Oluşturuldu', 'أُنشئ في', 'Créé le', 'Creato il', 'Δημιουργήθηκε'],
     'type_live': ['Live', 'Live', 'Canlı', 'مباشر', 'Direct', 'Live', 'Ζωντανά'],
+    'continue_watching': ['Weiterschauen', 'Continue watching', 'İzlemeye devam et', 'متابعة المشاهدة', 'Reprendre', 'Continua a guardare', 'Συνέχεια'],
     'yes': ['Ja', 'Yes', 'Evet', 'نعم', 'Oui', 'Sì', 'Ναι'],
     'no': ['Nein', 'No', 'Hayır', 'لا', 'Non', 'No', 'Όχι'],
   };
