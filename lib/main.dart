@@ -1183,10 +1183,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
     return Scaffold(
       backgroundColor: Colors.black,
-      body: MaterialVideoControlsTheme(
-        normal: controls,
-        fullscreen: controls,
-        child: Video(controller: controller),
+      body: Focus(
+        autofocus: true,
+        onKeyEvent: (node, event) {
+          if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
+          final k = event.logicalKey;
+          if (live && (k == LogicalKeyboardKey.arrowUp || k == LogicalKeyboardKey.channelUp)) { _zap(-1); return KeyEventResult.handled; }
+          if (live && (k == LogicalKeyboardKey.arrowDown || k == LogicalKeyboardKey.channelDown)) { _zap(1); return KeyEventResult.handled; }
+          if (k == LogicalKeyboardKey.mediaPlayPause || k == LogicalKeyboardKey.space) { player.playOrPause(); return KeyEventResult.handled; }
+          return KeyEventResult.ignored;
+        },
+        child: MaterialVideoControlsTheme(
+          normal: controls,
+          fullscreen: controls,
+          child: Video(controller: controller),
+        ),
       ),
     );
   }
