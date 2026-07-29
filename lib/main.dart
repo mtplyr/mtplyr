@@ -51,6 +51,45 @@ BoxDecoration _bgDeco() => const BoxDecoration(
     );
 bool _narrow(BuildContext c) => MediaQuery.of(c).size.width < 700;
 
+/// Fokussierbares Element für Fernbedienung/D-Pad (Android-TV, Samsung, LG).
+/// Zeigt bei Fokus einen blauen Rahmen; Touch (onTap) bleibt erhalten.
+class TvFocus extends StatefulWidget {
+  final Widget child;
+  final VoidCallback onTap;
+  final bool autofocus;
+  final double radius;
+  const TvFocus({super.key, required this.child, required this.onTap, this.autofocus = false, this.radius = 12});
+  @override
+  State<TvFocus> createState() => _TvFocusState();
+}
+
+class _TvFocusState extends State<TvFocus> {
+  bool _f = false;
+  @override
+  Widget build(BuildContext context) {
+    return FocusableActionDetector(
+      autofocus: widget.autofocus,
+      onFocusChange: (v) { if (v != _f) setState(() => _f = v); },
+      mouseCursor: SystemMouseCursors.click,
+      actions: {
+        ActivateIntent: CallbackAction<ActivateIntent>(onInvoke: (_) { widget.onTap(); return null; }),
+      },
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          foregroundDecoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(widget.radius),
+            border: Border.all(color: _f ? kBlue : Colors.transparent, width: 2.5),
+          ),
+          child: widget.child,
+        ),
+      ),
+    );
+  }
+}
+
 String _tsDate(dynamic v) {
   final s = '$v'.trim();
   if (s.isEmpty || s == '0' || s == 'null') return '—';
@@ -216,23 +255,26 @@ class HomeScreen extends StatelessWidget {
   Widget _grid(BuildContext context, bool narrow) {
     final tiles = _tiles(context);
     if (narrow) {
-      return GridView.count(crossAxisCount: 2, mainAxisSpacing: 14, crossAxisSpacing: 14, childAspectRatio: 1.2, children: [for (final t in tiles) _tileCard(t)]);
+      return GridView.count(crossAxisCount: 2, mainAxisSpacing: 14, crossAxisSpacing: 14, childAspectRatio: 1.2, children: [for (int i = 0; i < tiles.length; i++) _tileCard(tiles[i], autofocus: i == 0)]);
     }
     return Row(children: [
       for (int i = 0; i < tiles.length; i++) ...[
-        Expanded(child: _tileCard(tiles[i])),
+        Expanded(child: _tileCard(tiles[i], autofocus: i == 0)),
         if (i < tiles.length - 1) const SizedBox(width: 16),
       ],
     ]);
   }
 
-  Widget _iconBox(IconData i, {VoidCallback? onTap}) => GestureDetector(
-        onTap: onTap,
+  Widget _iconBox(IconData i, {VoidCallback? onTap}) => TvFocus(
+        onTap: onTap ?? () {},
+        radius: 11,
         child: Container(width: 42, height: 42, decoration: BoxDecoration(color: kPanel, borderRadius: BorderRadius.circular(11), border: Border.all(color: kLine)), child: Icon(i, color: kMuted, size: 20)),
       );
 
-  Widget _tileCard(_Tile t) => GestureDetector(
+  Widget _tileCard(_Tile t, {bool autofocus = false}) => TvFocus(
         onTap: t.onTap,
+        radius: 18,
+        autofocus: autofocus,
         child: Container(
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [kPanel, kBg2]), borderRadius: BorderRadius.circular(18), border: Border.all(color: kLine)),
@@ -341,8 +383,9 @@ class _LiveScreenState extends State<LiveScreen> {
         itemCount: cats.length,
         itemBuilder: (c, i) {
           final s = catSel == i;
-          return GestureDetector(
+          return TvFocus(
             onTap: () => _selectCat(i),
+            radius: 10,
             child: Container(
               margin: const EdgeInsets.fromLTRB(12, 4, 6, 4),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
@@ -362,8 +405,9 @@ class _LiveScreenState extends State<LiveScreen> {
           separatorBuilder: (_, _) => const SizedBox(width: 8),
           itemBuilder: (c, i) {
             final s = catSel == i;
-            return GestureDetector(
+            return TvFocus(
               onTap: () => _selectCat(i),
+              radius: 21,
               child: Container(
                 alignment: Alignment.center, padding: const EdgeInsets.symmetric(horizontal: 15),
                 decoration: BoxDecoration(color: s ? kBlue : kPanel2, borderRadius: BorderRadius.circular(21), border: Border.all(color: s ? kBlue : kLine)),
@@ -402,7 +446,9 @@ class _LiveScreenState extends State<LiveScreen> {
                 itemBuilder: (c, i) {
                   final ch = items[i];
                   final fav = FavStore.isFav(ch.id);
-                  return GestureDetector(
+                  return TvFocus(
+                    radius: 10,
+                    autofocus: i == 0,
                     onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => widget.catchup
                         ? CatchupProgramsScreen(streamId: ch.id, name: ch.name)
                         : PlayerScreen(
@@ -506,8 +552,9 @@ class _CatalogScreenState extends State<CatalogScreen> {
         itemCount: cats.length,
         itemBuilder: (c, i) {
           final s = catSel == i;
-          return GestureDetector(
+          return TvFocus(
             onTap: () => _selectCat(i),
+            radius: 10,
             child: Container(
               margin: const EdgeInsets.fromLTRB(12, 4, 6, 4),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
@@ -526,8 +573,9 @@ class _CatalogScreenState extends State<CatalogScreen> {
           separatorBuilder: (_, _) => const SizedBox(width: 8),
           itemBuilder: (c, i) {
             final s = catSel == i;
-            return GestureDetector(
+            return TvFocus(
               onTap: () => _selectCat(i),
+              radius: 21,
               child: Container(
                 alignment: Alignment.center, padding: const EdgeInsets.symmetric(horizontal: 15),
                 decoration: BoxDecoration(color: s ? kBlue : kPanel2, borderRadius: BorderRadius.circular(21), border: Border.all(color: s ? kBlue : kLine)),
@@ -573,7 +621,8 @@ class _CatalogScreenState extends State<CatalogScreen> {
     ]);
   }
 
-  Widget _poster(Item it) => GestureDetector(
+  Widget _poster(Item it) => TvFocus(
+        radius: 10,
         onTap: () => Navigator.of(context).push(MaterialPageRoute(
             builder: (_) => widget.type == 'series' ? SeriesDetailScreen(item: it) : MovieDetailScreen(item: it))),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -685,7 +734,8 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  Widget _poster(Item it) => GestureDetector(
+  Widget _poster(Item it) => TvFocus(
+        radius: 10,
         onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => tab == 1 ? SeriesDetailScreen(item: it) : MovieDetailScreen(item: it))),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Expanded(
@@ -771,6 +821,7 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                       SizedBox(
                         width: 220, height: 52,
                         child: FilledButton.icon(
+                          autofocus: true,
                           style: FilledButton.styleFrom(backgroundColor: kBlue, foregroundColor: kBg, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
                           onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(title: widget.item.name, url: Xtream.vodUrl(widget.item.id, ext), resume: true))),
                           icon: const Icon(Icons.play_arrow_rounded),
@@ -859,7 +910,8 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
                             separatorBuilder: (_, _) => const SizedBox(width: 8),
                             itemBuilder: (c, i) {
                               final s = seasons[i] == season;
-                              return GestureDetector(
+                              return TvFocus(
+                                radius: 19,
                                 onTap: () => setState(() => season = seasons[i]),
                                 child: Container(
                                   alignment: Alignment.center, padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -878,7 +930,9 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
                                 itemCount: eps.length,
                                 itemBuilder: (c, i) {
                                   final e = eps[i];
-                                  return GestureDetector(
+                                  return TvFocus(
+                                    radius: 10,
+                                    autofocus: i == 0,
                                     onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(title: e.title, url: Xtream.seriesEpUrl(e.id, e.ext), resume: true))),
                                     child: Container(
                                       margin: const EdgeInsets.symmetric(vertical: 4),
@@ -952,7 +1006,9 @@ class _CatchupProgramsScreenState extends State<CatchupProgramsScreen> {
                       itemCount: progs.length,
                       itemBuilder: (c, i) {
                         final p = progs[i];
-                        return GestureDetector(
+                        return TvFocus(
+                          radius: 10,
+                          autofocus: i == 0,
                           onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(title: '${widget.name} · ${p.title}', url: Xtream.timeshiftUrl(widget.streamId, p)))),
                           child: Container(
                             margin: const EdgeInsets.symmetric(vertical: 4),
@@ -1156,7 +1212,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
         itemCount: items.length,
         separatorBuilder: (_, _) => const Divider(height: 1, color: kLine),
-        itemBuilder: (c, i) => GestureDetector(
+        itemBuilder: (c, i) => TvFocus(
+          radius: 8,
+          autofocus: i == 0,
           onTap: () => setState(() => sel = i),
           child: Container(
             color: sel == i ? kBlue.withValues(alpha: .12) : Colors.transparent,
@@ -1251,7 +1309,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _opt(L.t('sf_hls'), Prefs.liveExt == 'm3u8', () { Prefs.setLiveExt('m3u8'); setState(() {}); }),
       ]));
 
-  Widget _opt(String label, bool on, VoidCallback onTap) => GestureDetector(
+  Widget _opt(String label, bool on, VoidCallback onTap) => TvFocus(
+        radius: 10,
         onTap: onTap,
         child: Container(
           margin: const EdgeInsets.only(bottom: 8), padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
@@ -1419,7 +1478,8 @@ class _HiddenCatsState extends State<_HiddenCats> {
           for (final t in [['live', L.t('type_live')], ['vod', L.t('home_movies')], ['series', L.t('home_series')]])
             Padding(
               padding: const EdgeInsets.only(right: 8),
-              child: GestureDetector(
+              child: TvFocus(
+                radius: 18,
                 onTap: () { type = t[0]; _load(); },
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
