@@ -1105,6 +1105,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
     super.dispose();
   }
 
+  void _seekBy(int seconds) {
+    final pos = player.state.position + Duration(seconds: seconds);
+    player.seek(pos < Duration.zero ? Duration.zero : pos);
+  }
+
   void _zap(int delta) {
     final ch = widget.channels;
     if (ch == null || widget.urlFor == null) return;
@@ -1190,7 +1195,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
           final k = event.logicalKey;
           if (live && (k == LogicalKeyboardKey.arrowUp || k == LogicalKeyboardKey.channelUp)) { _zap(-1); return KeyEventResult.handled; }
           if (live && (k == LogicalKeyboardKey.arrowDown || k == LogicalKeyboardKey.channelDown)) { _zap(1); return KeyEventResult.handled; }
-          if (k == LogicalKeyboardKey.mediaPlayPause || k == LogicalKeyboardKey.space) { player.playOrPause(); return KeyEventResult.handled; }
+          if (!live && k == LogicalKeyboardKey.arrowLeft) { _seekBy(-10); return KeyEventResult.handled; }
+          if (!live && k == LogicalKeyboardKey.arrowRight) { _seekBy(10); return KeyEventResult.handled; }
+          if (k == LogicalKeyboardKey.mediaPlayPause || k == LogicalKeyboardKey.space ||
+              k == LogicalKeyboardKey.select || k == LogicalKeyboardKey.enter) { player.playOrPause(); return KeyEventResult.handled; }
           return KeyEventResult.ignored;
         },
         child: MaterialVideoControlsTheme(
