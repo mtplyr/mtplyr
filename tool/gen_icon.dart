@@ -59,5 +59,57 @@ void main() {
     File('android/app/src/main/res/mipmap-$d/ic_launcher.png').writeAsBytesSync(img.encodePng(out));
   });
 
-  stdout.writeln('Icons erzeugt.');
+  // Launch-Logo (blaue Rundung + Play, transparenter Rand) fuer den iOS-Splash.
+  img.Image launchLogo(int px) {
+    final canvas = img.Image(width: px, height: px, numChannels: 4);
+    // transparent
+    for (var y = 0; y < px; y++) {
+      for (var x = 0; x < px; x++) {
+        canvas.setPixelRgba(x, y, 0, 0, 0, 0);
+      }
+    }
+    final pad = px * 0.14;
+    final side = px - 2 * pad;
+    final rad = side * 0.28;
+    bool inRounded(double x, double y) {
+      final lx = x - pad, ly = y - pad;
+      if (lx < 0 || ly < 0 || lx > side || ly > side) return false;
+      final dx = lx < rad ? rad - lx : (lx > side - rad ? lx - (side - rad) : 0.0);
+      final dy = ly < rad ? rad - ly : (ly > side - rad ? ly - (side - rad) : 0.0);
+      return dx * dx + dy * dy <= rad * rad;
+    }
+    for (var y = 0; y < px; y++) {
+      for (var x = 0; x < px; x++) {
+        if (inRounded(x.toDouble(), y.toDouble())) {
+          final t = (x + y) / (2 * px);
+          final r = (c1[0] + (c2[0] - c1[0]) * t).round();
+          final g = (c1[1] + (c2[1] - c1[1]) * t).round();
+          final b = (c1[2] + (c2[2] - c1[2]) * t).round();
+          canvas.setPixelRgba(x, y, r, g, b, 255);
+        }
+      }
+    }
+    final lcx = px / 2, lcy = px / 2;
+    final lw = px * 0.26, lh = px * 0.30;
+    final lax = lcx - lw / 2, lay1 = lcy - lh / 2, lay2 = lcy + lh / 2, lbx = lcx + lw / 2, lby = lcy;
+    for (var y = lay1.floor(); y <= lay2.ceil(); y++) {
+      for (var x = lax.floor(); x <= lbx.ceil(); x++) {
+        final fx = x.toDouble(), fy = y.toDouble();
+        final d1 = sign(fx, fy, lax, lay1, lbx, lby);
+        final d2 = sign(fx, fy, lbx, lby, lax, lay2);
+        final d3 = sign(fx, fy, lax, lay2, lax, lay1);
+        final neg = d1 < 0 || d2 < 0 || d3 < 0;
+        final pos = d1 > 0 || d2 > 0 || d3 > 0;
+        if (!(neg && pos)) canvas.setPixelRgba(x, y, 0xFF, 0xFF, 0xFF, 255);
+      }
+    }
+    return canvas;
+  }
+
+  const launchDir = 'ios/Runner/Assets.xcassets/LaunchImage.imageset';
+  File('$launchDir/LaunchImage.png').writeAsBytesSync(img.encodePng(launchLogo(120)));
+  File('$launchDir/LaunchImage@2x.png').writeAsBytesSync(img.encodePng(launchLogo(240)));
+  File('$launchDir/LaunchImage@3x.png').writeAsBytesSync(img.encodePng(launchLogo(360)));
+
+  stdout.writeln('Icons + Launch-Logo erzeugt.');
 }
