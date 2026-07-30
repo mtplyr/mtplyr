@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:local_auth/local_auth.dart';
+import 'package:screen_brightness/screen_brightness.dart';
 import 'xtream.dart';
 import 'l10n.dart';
 
@@ -1125,6 +1126,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   StreamSubscription? _durSub;
   StreamSubscription? _errSub;
   bool _seeked = false;
+  double _brightness = 0.5;
 
   Future<void> _applySubScale() async {
     try { await (player.platform as dynamic).setProperty('sub-scale', Prefs.subScale.toStringAsFixed(2)); } catch (_) {}
@@ -1136,6 +1138,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     player.open(Media(widget.url));
     _applySubScale();
     _loadEpg();
+    ScreenBrightness().application.then((v) { if (mounted) setState(() => _brightness = v); }).catchError((_) {});
     _errSub = player.stream.error.listen((e) {
       if (mounted && e.trim().isNotEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -1174,6 +1177,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
     _durSub?.cancel();
     _errSub?.cancel();
+    try { ScreenBrightness().resetApplicationScreenBrightness(); } catch (_) {}
     player.dispose();
     super.dispose();
   }
@@ -1237,6 +1241,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     // Bedienelemente von den (abgerundeten) Rändern wegrücken + oben auto-ausblenden.
     final controls = MaterialVideoControlsThemeData(
       seekOnDoubleTap: true, // Doppeltipp links/rechts = zurück/vor spulen (wie YouTube)
+      // Vertikal wischen: links = Helligkeit, rechts = Lautstärke (wie IBO).
+      volumeGesture: true,
+      brightnessGesture: true,
+      initialBrightness: _brightness,
+      onBrightnessChanged: (v) { try { ScreenBrightness().setApplicationScreenBrightness(v.clamp(0.0, 1.0)); } catch (_) {} },
+      onBrightnessReset: () { try { ScreenBrightness().resetApplicationScreenBrightness(); } catch (_) {} },
       padding: EdgeInsets.only(
         left: ins(safe.left, 16), right: ins(safe.right, 16),
         top: ins(safe.top, 8), bottom: ins(safe.bottom, 10),
