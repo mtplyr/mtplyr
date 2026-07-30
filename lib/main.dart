@@ -1308,13 +1308,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
       initialBrightness: _brightness,
       onBrightnessChanged: (v) { try { ScreenBrightness().setApplicationScreenBrightness(v.clamp(0.0, 1.0)); } catch (_) {} },
       onBrightnessReset: () { try { ScreenBrightness().resetApplicationScreenBrightness(); } catch (_) {} },
+      // Lautstärke-Geste (rechts): media_kit ruft nur diesen Callback – ohne ihn passiert nichts.
+      initialVolume: (player.state.volume / 100).clamp(0.0, 1.0),
+      onVolumeChanged: (v) { player.setVolume((v * 100).clamp(0.0, 100.0)); },
       controlsHoverDuration: const Duration(seconds: 5), // Steuerung länger sichtbar, Timer startet bei Touch neu
       padding: EdgeInsets.only(
         left: ins(safe.left, 16), right: ins(safe.right, 16),
         top: ins(safe.top, 8), bottom: ins(safe.bottom, 10),
       ),
-      seekBarMargin: EdgeInsets.only(bottom: 46, left: ins(safe.left, 12), right: ins(safe.right, 12)),
-      bottomButtonBarMargin: EdgeInsets.only(bottom: ins(safe.bottom, 10), left: ins(safe.left, 14), right: ins(safe.right, 14)),
+      seekBarMargin: EdgeInsets.only(bottom: 42, left: ins(safe.left, 16), right: ins(safe.right, 16)),
+      bottomButtonBarMargin: EdgeInsets.only(bottom: 42, left: ins(safe.left, 16), right: ins(safe.right, 16)),
       topButtonBarMargin: const EdgeInsets.only(top: 4, left: 4, right: 4),
       // Kein Vollbild-Button (App ist immer Vollbild) – nur die Restzeit-Anzeige.
       bottomButtonBar: const [MaterialPositionIndicator()],
