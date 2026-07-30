@@ -1129,10 +1129,38 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _seeked = false;
   double _brightness = 0.5;
   BoxFit _fit = BoxFit.contain;
+  bool _locked = false;
+  Timer? _sleepTimer;
 
   void _cycleFit() => setState(() {
         _fit = _fit == BoxFit.contain ? BoxFit.cover : (_fit == BoxFit.cover ? BoxFit.fill : BoxFit.contain);
       });
+
+  void _setSleep(int minutes) {
+    _sleepTimer?.cancel();
+    if (minutes > 0) {
+      _sleepTimer = Timer(Duration(minutes: minutes), () { if (mounted) Navigator.of(context).maybePop(); });
+    }
+  }
+
+  void _sleepMenu() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: kPanel,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (_) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Padding(padding: const EdgeInsets.all(16), child: Text(L.t('sleep_timer'), style: const TextStyle(color: kText, fontWeight: FontWeight.w700, fontSize: 16))),
+          for (final m in const [0, 15, 30, 45, 60, 90])
+            ListTile(
+              leading: Icon(m == 0 ? Icons.bedtime_off_rounded : Icons.bedtime_rounded, color: kBlue, size: 18),
+              title: Text(m == 0 ? L.t('off') : '$m ${L.t('minutes_short')}', style: const TextStyle(color: kText, fontSize: 14)),
+              onTap: () { _setSleep(m); Navigator.pop(context); },
+            ),
+        ]),
+      ),
+    );
+  }
 
   Future<void> _applySubScale() async {
     try { await (player.platform as dynamic).setProperty('sub-scale', Prefs.subScale.toStringAsFixed(2)); } catch (_) {}
@@ -1184,6 +1212,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
     _durSub?.cancel();
     _errSub?.cancel();
+    _sleepTimer?.cancel();
     try { ScreenBrightness().resetApplicationScreenBrightness(); } catch (_) {}
     player.dispose();
     super.dispose();
@@ -1276,6 +1305,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
         MaterialCustomButton(onPressed: () => _tracks(true), icon: const Icon(Icons.audiotrack_rounded, color: Colors.white)),
         MaterialCustomButton(onPressed: () => _tracks(false), icon: const Icon(Icons.closed_caption_rounded, color: Colors.white)),
         MaterialCustomButton(onPressed: _cycleFit, icon: const Icon(Icons.aspect_ratio_rounded, color: Colors.white)),
+        MaterialCustomButton(onPressed: _sleepMenu, icon: Icon(_sleepTimer?.isActive == true ? Icons.bedtime_rounded : Icons.bedtime_off_rounded, color: Colors.white)),
+        MaterialCustomButton(onPressed: () => setState(() => _locked = true), icon: const Icon(Icons.lock_open_rounded, color: Colors.white)),
       ],
     );
     return Scaffold(
@@ -1284,6 +1315,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         autofocus: true,
         onKeyEvent: (node, event) {
           if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
+          if (_locked) return KeyEventResult.ignored;
           final k = event.logicalKey;
           if (live && (k == LogicalKeyboardKey.arrowUp || k == LogicalKeyboardKey.channelUp)) { _zap(-1); return KeyEventResult.handled; }
           if (live && (k == LogicalKeyboardKey.arrowDown || k == LogicalKeyboardKey.channelDown)) { _zap(1); return KeyEventResult.handled; }
@@ -1293,11 +1325,27 @@ class _PlayerScreenState extends State<PlayerScreen> {
               k == LogicalKeyboardKey.select || k == LogicalKeyboardKey.enter) { player.playOrPause(); return KeyEventResult.handled; }
           return KeyEventResult.ignored;
         },
-        child: MaterialVideoControlsTheme(
-          normal: controls,
-          fullscreen: controls,
-          child: Video(controller: controller, fit: _fit),
-        ),
+        child: Stack(children: [
+          Positioned.fill(
+            child: MaterialVideoControlsTheme(
+              normal: controls,
+              fullscreen: controls,
+              child: Video(controller: controller, fit: _fit, controls: _locked ? NoVideoControls : AdaptiveVideoControls),
+            ),
+          ),
+          if (_locked)
+            Positioned(
+              top: ins(safe.top, 16), left: ins(safe.left, 16),
+              child: GestureDetector(
+                onTap: () => setState(() => _locked = false),
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+                  child: const Icon(Icons.lock_rounded, color: Colors.white, size: 24),
+                ),
+              ),
+            ),
+        ]),
       ),
     );
   }

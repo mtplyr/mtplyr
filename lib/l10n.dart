@@ -136,6 +136,8 @@ class L {
     'type_live': ['Live', 'Live', 'Canlı', 'مباشر', 'Direct', 'Live', 'Ζωντανά'],
     'continue_watching': ['Weiterschauen', 'Continue watching', 'İzlemeye devam et', 'متابعة المشاهدة', 'Reprendre', 'Continua a guardare', 'Συνέχεια'],
     'retry': ['Erneut', 'Retry', 'Tekrar dene', 'إعادة', 'Réessayer', 'Riprova', 'Επανάληψη'],
+    'sleep_timer': ['Sleep-Timer', 'Sleep timer', 'Uyku zamanlayıcı', 'مؤقت النوم', 'Minuterie de veille', 'Timer di spegnimento', 'Χρονοδιακόπτης'],
+    'off': ['Aus', 'Off', 'Kapalı', 'إيقاف', 'Désactivé', 'Spento', 'Ανενεργό'],
     'yes': ['Ja', 'Yes', 'Evet', 'نعم', 'Oui', 'Sì', 'Ναι'],
     'no': ['Nein', 'No', 'Hayır', 'لا', 'Non', 'No', 'Όχι'],
   };
