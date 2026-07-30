@@ -1311,7 +1311,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
       // Lautstärke-Geste (rechts): media_kit ruft nur diesen Callback – ohne ihn passiert nichts.
       initialVolume: (player.state.volume / 100).clamp(0.0, 1.0),
       onVolumeChanged: (v) { player.setVolume((v * 100).clamp(0.0, 100.0)); },
-      controlsHoverDuration: const Duration(seconds: 5), // Steuerung länger sichtbar, Timer startet bei Touch neu
+      // Steuerung verschwindet NICHT von allein (media_kit kann den Timer bei Button-Taps
+      // nicht zurücksetzen). Sie bleibt offen, bis man aufs Bild tippt (dann aus). So verschwindet
+      // beim Einstellen/Testen nichts mehr; Wischgesten bleiben aktiv.
+      controlsHoverDuration: const Duration(days: 1),
+      visibleOnMount: true,
       padding: EdgeInsets.only(
         left: ins(safe.left, 16), right: ins(safe.right, 16),
         top: ins(safe.top, 8), bottom: ins(safe.bottom, 10),
