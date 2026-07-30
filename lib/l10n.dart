@@ -135,6 +135,7 @@ class L {
     'acc_created': ['Erstellt am', 'Created', 'Oluşturuldu', 'أُنشئ في', 'Créé le', 'Creato il', 'Δημιουργήθηκε'],
     'type_live': ['Live', 'Live', 'Canlı', 'مباشر', 'Direct', 'Live', 'Ζωντανά'],
     'continue_watching': ['Weiterschauen', 'Continue watching', 'İzlemeye devam et', 'متابعة المشاهدة', 'Reprendre', 'Continua a guardare', 'Συνέχεια'],
+    'retry': ['Erneut', 'Retry', 'Tekrar dene', 'إعادة', 'Réessayer', 'Riprova', 'Επανάληψη'],
     'yes': ['Ja', 'Yes', 'Evet', 'نعم', 'Oui', 'Sì', 'Ναι'],
     'no': ['Nein', 'No', 'Hayır', 'لا', 'Non', 'No', 'Όχι'],
   };
