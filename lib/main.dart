@@ -1130,11 +1130,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
   double _brightness = 0.5;
   BoxFit _fit = BoxFit.contain;
   bool _locked = false;
+  bool _lockHint = false;
+  Timer? _lockHintTimer;
   Timer? _sleepTimer;
 
   void _cycleFit() => setState(() {
         _fit = _fit == BoxFit.contain ? BoxFit.cover : (_fit == BoxFit.cover ? BoxFit.fill : BoxFit.contain);
       });
+
+  void _lock() { setState(() => _locked = true); _showLockHint(); }
+  void _unlock() { _lockHintTimer?.cancel(); setState(() { _locked = false; _lockHint = false; }); }
+  void _showLockHint() {
+    setState(() => _lockHint = true);
+    _lockHintTimer?.cancel();
+    _lockHintTimer = Timer(const Duration(seconds: 3), () { if (mounted) setState(() => _lockHint = false); });
+  }
 
   void _setSleep(int minutes) {
     _sleepTimer?.cancel();
@@ -1149,15 +1159,28 @@ class _PlayerScreenState extends State<PlayerScreen> {
       backgroundColor: kPanel,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (_) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Padding(padding: const EdgeInsets.all(16), child: Text(L.t('sleep_timer'), style: const TextStyle(color: kText, fontWeight: FontWeight.w700, fontSize: 16))),
-          for (final m in const [0, 15, 30, 45, 60, 90])
-            ListTile(
-              leading: Icon(m == 0 ? Icons.bedtime_off_rounded : Icons.bedtime_rounded, color: kBlue, size: 18),
-              title: Text(m == 0 ? L.t('off') : '$m ${L.t('minutes_short')}', style: const TextStyle(color: kText, fontSize: 14)),
-              onTap: () { _setSleep(m); Navigator.pop(context); },
-            ),
-        ]),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              const Icon(Icons.bedtime_rounded, color: kBlue, size: 18),
+              const SizedBox(width: 8),
+              Text(L.t('sleep_timer'), style: const TextStyle(color: kText, fontWeight: FontWeight.w700, fontSize: 16)),
+            ]),
+            const SizedBox(height: 16),
+            Wrap(spacing: 10, runSpacing: 10, children: [
+              for (final m in const [0, 15, 30, 45, 60, 90])
+                GestureDetector(
+                  onTap: () { _setSleep(m); Navigator.pop(context); if (mounted) setState(() {}); },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11),
+                    decoration: BoxDecoration(color: kPanel2, borderRadius: BorderRadius.circular(21), border: Border.all(color: kLine)),
+                    child: Text(m == 0 ? L.t('off') : '$m ${L.t('minutes_short')}', style: const TextStyle(color: kText, fontSize: 14, fontWeight: FontWeight.w600)),
+                  ),
+                ),
+            ]),
+          ]),
+        ),
       ),
     );
   }
@@ -1213,6 +1236,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _durSub?.cancel();
     _errSub?.cancel();
     _sleepTimer?.cancel();
+    _lockHintTimer?.cancel();
     try { ScreenBrightness().resetApplicationScreenBrightness(); } catch (_) {}
     player.dispose();
     super.dispose();
@@ -1284,13 +1308,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
       initialBrightness: _brightness,
       onBrightnessChanged: (v) { try { ScreenBrightness().setApplicationScreenBrightness(v.clamp(0.0, 1.0)); } catch (_) {} },
       onBrightnessReset: () { try { ScreenBrightness().resetApplicationScreenBrightness(); } catch (_) {} },
+      controlsHoverDuration: const Duration(seconds: 5), // Steuerung länger sichtbar, Timer startet bei Touch neu
       padding: EdgeInsets.only(
         left: ins(safe.left, 16), right: ins(safe.right, 16),
         top: ins(safe.top, 8), bottom: ins(safe.bottom, 10),
       ),
-      seekBarMargin: const EdgeInsets.only(bottom: 26, left: 10, right: 10),
-      bottomButtonBarMargin: const EdgeInsets.only(bottom: 8, left: 8, right: 8),
+      seekBarMargin: EdgeInsets.only(bottom: 46, left: ins(safe.left, 12), right: ins(safe.right, 12)),
+      bottomButtonBarMargin: EdgeInsets.only(bottom: ins(safe.bottom, 10), left: ins(safe.left, 14), right: ins(safe.right, 14)),
       topButtonBarMargin: const EdgeInsets.only(top: 4, left: 4, right: 4),
+      // Kein Vollbild-Button (App ist immer Vollbild) – nur die Restzeit-Anzeige.
+      bottomButtonBar: const [MaterialPositionIndicator()],
       topButtonBar: [
         MaterialCustomButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 22)),
         const SizedBox(width: 6),
@@ -1306,7 +1333,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         MaterialCustomButton(onPressed: () => _tracks(false), icon: const Icon(Icons.closed_caption_rounded, color: Colors.white)),
         MaterialCustomButton(onPressed: _cycleFit, icon: const Icon(Icons.aspect_ratio_rounded, color: Colors.white)),
         MaterialCustomButton(onPressed: _sleepMenu, icon: Icon(_sleepTimer?.isActive == true ? Icons.bedtime_rounded : Icons.bedtime_off_rounded, color: Colors.white)),
-        MaterialCustomButton(onPressed: () => setState(() => _locked = true), icon: const Icon(Icons.lock_open_rounded, color: Colors.white)),
+        MaterialCustomButton(onPressed: _lock, icon: const Icon(Icons.lock_open_rounded, color: Colors.white)),
       ],
     );
     return Scaffold(
@@ -1333,14 +1360,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
               child: Video(controller: controller, fit: _fit, controls: _locked ? NoVideoControls : AdaptiveVideoControls),
             ),
           ),
+          // Bei Sperre: unsichtbare Ebene schluckt ALLE Tipps; ein Tipp zeigt kurz das Entsperr-Symbol.
           if (_locked)
+            Positioned.fill(
+              child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: _showLockHint, child: const SizedBox.expand()),
+            ),
+          if (_locked && _lockHint)
             Positioned(
               top: ins(safe.top, 16), left: ins(safe.left, 16),
               child: GestureDetector(
-                onTap: () => setState(() => _locked = false),
+                onTap: _unlock,
                 child: Container(
                   padding: const EdgeInsets.all(12),
-                  decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+                  decoration: BoxDecoration(color: Colors.black.withValues(alpha: .55), shape: BoxShape.circle, border: Border.all(color: Colors.white24)),
                   child: const Icon(Icons.lock_rounded, color: Colors.white, size: 24),
                 ),
               ),
