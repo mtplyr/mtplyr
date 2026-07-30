@@ -143,6 +143,17 @@ class Xtream {
         .toList();
   }
 
+  /// Alle Live-Sender (ohne Kategorie) – für die globale Suche. Adult-Filter je nach Einstellung.
+  static Future<List<Item>> allLive() async {
+    final j = await _get('live_streams');
+    if (j is! List) return [];
+    final list = j
+        .map((e) => Item(e['stream_id'].toString(), (e['name'] ?? '').toString(),
+            (e['stream_icon'] ?? '').toString(), num: int.tryParse('${e['num']}') ?? 0))
+        .toList();
+    return Prefs.hideAdult ? list.where((c) => !Prefs.isAdult(c.name)).toList() : list;
+  }
+
   static Future<List<Item>> seriesList(String catId) async {
     final j = await _get('series', {'category_id': catId});
     if (j is! List) return [];

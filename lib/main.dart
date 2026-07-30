@@ -721,10 +721,10 @@ class SearchScreen extends StatefulWidget {
 }
 
 class _SearchScreenState extends State<SearchScreen> {
-  List<Item> vod = [], series = [];
+  List<Item> vod = [], series = [], live = [];
   bool loading = true;
   String query = '';
-  int tab = 0; // 0 = Filme, 1 = Serien
+  int tab = 0; // 0 = Filme, 1 = Serien, 2 = Live
 
   @override
   void initState() {
@@ -734,16 +734,17 @@ class _SearchScreenState extends State<SearchScreen> {
 
   Future<void> _load() async {
     try {
-      final r = await Future.wait([Xtream.allVod(), Xtream.allSeries()]);
+      final r = await Future.wait([Xtream.allVod(), Xtream.allSeries(), Xtream.allLive()]);
       vod = r[0];
       series = r[1];
+      live = r[2];
     } catch (_) {}
     if (mounted) setState(() => loading = false);
   }
 
   @override
   Widget build(BuildContext context) {
-    final src = tab == 0 ? vod : series;
+    final src = tab == 0 ? vod : (tab == 1 ? series : live);
     final results = query.length < 2 ? <Item>[] : src.where((e) => e.name.toLowerCase().contains(query.toLowerCase())).take(80).toList();
     return Scaffold(
       appBar: _subBar(context, L.t('search_title')),
@@ -767,7 +768,7 @@ class _SearchScreenState extends State<SearchScreen> {
               ),
               const SizedBox(height: 10),
               Row(children: [
-                for (final t in [[0, L.t('home_movies')], [1, L.t('home_series')]])
+                for (final t in [[0, L.t('home_movies')], [1, L.t('home_series')], [2, L.t('type_live')]])
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
                     child: GestureDetector(
@@ -788,14 +789,16 @@ class _SearchScreenState extends State<SearchScreen> {
                         ? _empty(L.t('search_min2'))
                         : results.isEmpty
                             ? _empty(L.t('no_hits'))
-                            : LayoutBuilder(builder: (c, cons) {
-                                final cols = (cons.maxWidth / 130).floor().clamp(2, 8);
-                                return GridView.builder(
-                                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: cols, mainAxisSpacing: 12, crossAxisSpacing: 12, childAspectRatio: .58),
-                                  itemCount: results.length,
-                                  itemBuilder: (c, i) => _poster(results[i]),
-                                );
-                              }),
+                            : tab == 2
+                                ? _liveList(results)
+                                : LayoutBuilder(builder: (c, cons) {
+                                    final cols = (cons.maxWidth / 130).floor().clamp(2, 8);
+                                    return GridView.builder(
+                                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: cols, mainAxisSpacing: 12, crossAxisSpacing: 12, childAspectRatio: .58),
+                                      itemCount: results.length,
+                                      itemBuilder: (c, i) => _poster(results[i]),
+                                    );
+                                  }),
               ),
             ]),
           ),
@@ -803,6 +806,38 @@ class _SearchScreenState extends State<SearchScreen> {
       ),
     );
   }
+
+  Widget _liveList(List<Item> items) => ListView.builder(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        itemCount: items.length,
+        itemBuilder: (c, i) {
+          final ch = items[i];
+          return TvFocus(
+            radius: 10,
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(
+                  title: ch.name, url: Xtream.liveUrl(ch.id),
+                  channels: items, index: i, urlFor: (c) => Xtream.liveUrl(c.id),
+                ))),
+            child: Container(
+              margin: const EdgeInsets.symmetric(vertical: 3),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(color: kPanel.withValues(alpha: .4), borderRadius: BorderRadius.circular(10), border: Border.all(color: kLine)),
+              child: Row(children: [
+                Container(
+                  width: 42, height: 30, clipBehavior: Clip.antiAlias,
+                  decoration: BoxDecoration(color: kPanel2, borderRadius: BorderRadius.circular(6)),
+                  child: ch.icon.isEmpty
+                      ? const Icon(Icons.tv_rounded, size: 16, color: kMuted)
+                      : Image.network(ch.icon, fit: BoxFit.contain, errorBuilder: (_, _, _) => const Icon(Icons.tv_rounded, size: 16, color: kMuted)),
+                ),
+                const SizedBox(width: 12),
+                Expanded(child: Text(ch.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kText, fontSize: 14, fontWeight: FontWeight.w600))),
+                const Icon(Icons.play_circle_outline_rounded, color: kMuted, size: 20),
+              ]),
+            ),
+          );
+        },
+      );
 
   Widget _poster(Item it) => TvFocus(
         radius: 10,
