@@ -1127,6 +1127,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   StreamSubscription? _errSub;
   bool _seeked = false;
   double _brightness = 0.5;
+  BoxFit _fit = BoxFit.contain;
+
+  void _cycleFit() => setState(() {
+        _fit = _fit == BoxFit.contain ? BoxFit.cover : (_fit == BoxFit.cover ? BoxFit.fill : BoxFit.contain);
+      });
 
   Future<void> _applySubScale() async {
     try { await (player.platform as dynamic).setProperty('sub-scale', Prefs.subScale.toStringAsFixed(2)); } catch (_) {}
@@ -1267,6 +1272,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         if (live) MaterialCustomButton(onPressed: () => _zap(1), icon: const Icon(Icons.skip_next_rounded, color: Colors.white)),
         MaterialCustomButton(onPressed: () => _tracks(true), icon: const Icon(Icons.audiotrack_rounded, color: Colors.white)),
         MaterialCustomButton(onPressed: () => _tracks(false), icon: const Icon(Icons.closed_caption_rounded, color: Colors.white)),
+        MaterialCustomButton(onPressed: _cycleFit, icon: const Icon(Icons.aspect_ratio_rounded, color: Colors.white)),
       ],
     );
     return Scaffold(
@@ -1287,7 +1293,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         child: MaterialVideoControlsTheme(
           normal: controls,
           fullscreen: controls,
-          child: Video(controller: controller),
+          child: Video(controller: controller, fit: _fit),
         ),
       ),
     );
