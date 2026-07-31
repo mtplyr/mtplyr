@@ -155,6 +155,22 @@ class _ActivationScreenState extends State<ActivationScreen> {
     if (mounted) setState(() { busy = false; msg = L.t('activate_pending'); });
   }
 
+  Widget _idRow(String label, String value) => Row(children: [
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(label, style: const TextStyle(color: kMuted, fontSize: 12)),
+          const SizedBox(height: 3),
+          Text(value, style: const TextStyle(color: kBlue, fontSize: 21, fontWeight: FontWeight.w800, letterSpacing: 1.5, fontFamily: 'monospace')),
+        ])),
+        IconButton(
+          onPressed: () async {
+            final messenger = ScaffoldMessenger.of(context);
+            await Clipboard.setData(ClipboardData(text: value));
+            messenger.showSnackBar(SnackBar(backgroundColor: kPanel, content: Text(L.t('copied'), style: const TextStyle(color: kText))));
+          },
+          icon: const Icon(Icons.copy_rounded, color: kMuted, size: 20),
+        ),
+      ]);
+
   Widget _step(String n, String text) => Padding(
         padding: const EdgeInsets.only(bottom: 12),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -184,22 +200,12 @@ class _ActivationScreenState extends State<ActivationScreen> {
                   const SizedBox(height: 20),
                   Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
                     decoration: BoxDecoration(color: kPanel, borderRadius: BorderRadius.circular(14), border: Border.all(color: kLine)),
-                    child: Row(children: [
-                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text(L.t('device_code'), style: const TextStyle(color: kMuted, fontSize: 12)),
-                        const SizedBox(height: 4),
-                        Text(Session.deviceCode, style: const TextStyle(color: kBlue, fontSize: 24, fontWeight: FontWeight.w800, letterSpacing: 2, fontFamily: 'monospace')),
-                      ])),
-                      IconButton(
-                        onPressed: () async {
-                          final messenger = ScaffoldMessenger.of(context);
-                          await Clipboard.setData(ClipboardData(text: Session.deviceCode));
-                          messenger.showSnackBar(SnackBar(backgroundColor: kPanel, content: Text(L.t('copied'), style: const TextStyle(color: kText))));
-                        },
-                        icon: const Icon(Icons.copy_rounded, color: kMuted),
-                      ),
+                    child: Column(children: [
+                      _idRow(L.t('mac_address'), Session.mac),
+                      const Divider(color: kLine, height: 20),
+                      _idRow(L.t('device_key_label'), Session.deviceKey),
                     ]),
                   ),
                   const SizedBox(height: 22),

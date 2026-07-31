@@ -22,7 +22,8 @@ class Account {
 /// Aktuelle Sitzung (Zugangsdaten), persistiert.
 class Session {
   static Account? account;
-  static String deviceCode = '';
+  static String mac = '';
+  static String deviceKey = '';
 
   static Future<void> load() async {
     final p = await SharedPreferences.getInstance();
@@ -30,24 +31,29 @@ class Session {
     final u = p.getString('xt_user');
     final pw = p.getString('xt_pass');
     if (h != null && u != null && pw != null) account = Account(h, u, pw);
-    deviceCode = p.getString('device_code') ?? '';
-    if (deviceCode.isEmpty) {
-      deviceCode = _genCode();
-      await p.setString('device_code', deviceCode);
-    }
+    mac = p.getString('device_mac') ?? '';
+    deviceKey = p.getString('device_key') ?? '';
+    if (mac.isEmpty) { mac = _genMac(); await p.setString('device_mac', mac); }
+    if (deviceKey.isEmpty) { deviceKey = _genKey(); await p.setString('device_key', deviceKey); }
   }
 
-  static String _genCode() {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // ohne verwechselbare (0/O, 1/I)
+  // Geräte-Identität wie vela/mtplyr/IBO: virtuelle MAC + Geräteschlüssel.
+  // iOS gibt die echte MAC nicht her -> einmal generiert & gespeichert.
+  static String _genMac() {
     final r = Random.secure();
-    final b = List.generate(12, (_) => chars[r.nextInt(chars.length)]);
-    return '${b.sublist(0, 4).join()}-${b.sublist(4, 8).join()}-${b.sublist(8, 12).join()}';
+    String h2() => r.nextInt(256).toRadixString(16).padLeft(2, '0').toUpperCase();
+    return '1A:2B:3C:${h2()}:${h2()}:${h2()}';
   }
 
-  /// Fragt den Hub, ob dem Geräte-Code bereits eine Playlist zugewiesen wurde.
+  static String _genKey() {
+    final r = Random.secure();
+    return List.generate(6, (_) => r.nextInt(10)).join();
+  }
+
+  /// Fragt den Hub, ob dieser MAC/Key bereits eine Playlist zugewiesen bekommen hat.
   static Future<Account?> activationLookup() async {
     try {
-      final uri = Uri.parse(kActivate).replace(queryParameters: {'code': deviceCode});
+      final uri = Uri.parse(kActivate).replace(queryParameters: {'mac': mac, 'key': deviceKey});
       final r = await http.get(uri).timeout(const Duration(seconds: 15));
       if (r.statusCode == 200) {
         final j = jsonDecode(r.body);
