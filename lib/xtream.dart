@@ -8,6 +8,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// Proxy auf dem Hub (umgeht CORS, holt Provider-Daten server-zu-server).
 const String kProxy = 'https://hub.mtplyr.com/api/xt.php';
 
+/// Web-Erkennung ohne Flutter-Import (auf Web sind int/double identisch).
+const bool kOnWeb = identical(0, 0.0);
+
 /// Aktivierung: Hub-Endpunkt, der zu einem Geräte-Code die verknüpfte Playlist zurückgibt.
 const String kActivate = 'https://hub.mtplyr.com/api/vela_activate.php';
 
@@ -331,7 +334,7 @@ class Prefs {
 
   static Future<void> load() async {
     final p = await SharedPreferences.getInstance();
-    liveExt = p.getString('live_ext') ?? 'ts';
+    liveExt = p.getString('live_ext') ?? (kOnWeb ? 'm3u8' : 'ts'); // Web/TV: HLS (media_kit-Web spielt nur HLS)
     hideAdult = p.getBool('hide_adult') ?? false;
     hidden = (p.getStringList('hidden_cats') ?? []).toSet();
     pinHash = p.getString('pin_hash');
