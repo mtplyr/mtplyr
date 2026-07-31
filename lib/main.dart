@@ -130,6 +130,34 @@ class VelaLogo extends StatelessWidget {
   }
 }
 
+// MAC + Geräteschlüssel als Panel (Aktivierung + Playlist-Screen).
+Widget _idRowT(BuildContext context, String label, String value) => Row(children: [
+      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(label, style: const TextStyle(color: kMuted, fontSize: 12)),
+        const SizedBox(height: 3),
+        Text(value, style: const TextStyle(color: kBlue, fontSize: 20, fontWeight: FontWeight.w800, letterSpacing: 1.5, fontFamily: 'monospace')),
+      ])),
+      IconButton(
+        onPressed: () async {
+          final messenger = ScaffoldMessenger.of(context);
+          await Clipboard.setData(ClipboardData(text: value));
+          messenger.showSnackBar(SnackBar(backgroundColor: kPanel, content: Text(L.t('copied'), style: const TextStyle(color: kText))));
+        },
+        icon: const Icon(Icons.copy_rounded, color: kMuted, size: 20),
+      ),
+    ]);
+
+Widget _idPanel(BuildContext context) => Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+      decoration: BoxDecoration(color: kPanel, borderRadius: BorderRadius.circular(14), border: Border.all(color: kLine)),
+      child: Column(children: [
+        _idRowT(context, L.t('mac_address'), Session.mac),
+        const Divider(color: kLine, height: 20),
+        _idRowT(context, L.t('device_key_label'), Session.deviceKey),
+      ]),
+    );
+
 // ============================ GATE: entscheidet Home / Paywall / Playlist abgelaufen ============================
 class HomeGate extends StatefulWidget {
   const HomeGate({super.key});
@@ -232,9 +260,37 @@ class PaywallScreen extends StatelessWidget {
   }
 }
 
-// ============================ PLAYLIST ABGELAUFEN (Anbieter) ============================
+// ============================ PLAYLIST ABGELAUFEN / NICHT AKTIV ============================
 class PlaylistExpiredScreen extends StatelessWidget {
   const PlaylistExpiredScreen({super.key});
+
+  void _menu(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: kPanel,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (_) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: const Icon(Icons.settings_rounded, color: kBlue),
+            title: Text(L.t('settings_title'), style: const TextStyle(color: kText)),
+            onTap: () { Navigator.pop(context); Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsScreen())); },
+          ),
+          ListTile(
+            leading: const Icon(Icons.swap_horiz_rounded, color: kBlue),
+            title: Text(L.t('change_playlist'), style: const TextStyle(color: kText)),
+            onTap: () async { Navigator.pop(context); await Session.clear(); if (context.mounted) Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const ActivationScreen()), (_) => false); },
+          ),
+          ListTile(
+            leading: const Icon(Icons.logout_rounded, color: kMuted),
+            title: Text(L.t('logout'), style: const TextStyle(color: kText)),
+            onTap: () async { Navigator.pop(context); await Session.clear(); if (context.mounted) Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const ActivationScreen()), (_) => false); },
+          ),
+        ]),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -248,29 +304,40 @@ class PlaylistExpiredScreen extends StatelessWidget {
                 constraints: const BoxConstraints(maxWidth: 460),
                 child: Column(mainAxisSize: MainAxisSize.min, children: [
                   const VelaLogo(size: 44),
-                  const SizedBox(height: 22),
-                  Container(width: 72, height: 72, decoration: BoxDecoration(color: const Color(0xFFE0B366).withValues(alpha: .16), borderRadius: BorderRadius.circular(20)), child: const Icon(Icons.event_busy_rounded, color: Color(0xFFE0B366), size: 36)),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 20),
+                  Container(width: 66, height: 66, decoration: BoxDecoration(color: const Color(0xFFE0B366).withValues(alpha: .16), borderRadius: BorderRadius.circular(18)), child: const Icon(Icons.event_busy_rounded, color: Color(0xFFE0B366), size: 32)),
+                  const SizedBox(height: 14),
                   Text(L.t('playlist_expired_title'), textAlign: TextAlign.center, style: const TextStyle(color: kText, fontSize: 22, fontWeight: FontWeight.w800, fontFamily: 'serif')),
                   const SizedBox(height: 6),
                   Text(L.t('playlist_expired_body'), textAlign: TextAlign.center, style: const TextStyle(color: kMuted, fontSize: 13.5, height: 1.4)),
-                  const SizedBox(height: 24),
-                  SizedBox(
-                    width: double.infinity, height: 50,
-                    child: FilledButton(
-                      style: FilledButton.styleFrom(backgroundColor: kBlue, foregroundColor: kBg, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11))),
-                      onPressed: () => Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const HomeGate())),
-                      child: Text(L.t('recheck'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 18),
+                  _idPanel(context),
+                  const SizedBox(height: 18),
+                  Row(children: [
+                    Expanded(
+                      child: SizedBox(
+                        height: 50,
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(side: const BorderSide(color: kLine), foregroundColor: kText),
+                          onPressed: () => _menu(context),
+                          icon: const Icon(Icons.menu_rounded, size: 20),
+                          label: Text(L.t('menu'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                        ),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  TextButton(
-                    onPressed: () async {
-                      await Session.clear();
-                      if (context.mounted) Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const ActivationScreen()), (_) => false);
-                    },
-                    child: Text(L.t('logout'), style: const TextStyle(color: kMuted, fontSize: 13)),
-                  ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: SizedBox(
+                        height: 50,
+                        child: FilledButton.icon(
+                          style: FilledButton.styleFrom(backgroundColor: kBlue, foregroundColor: kBg, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11))),
+                          onPressed: () => Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const HomeGate())),
+                          icon: const Icon(Icons.refresh_rounded, size: 20),
+                          label: Text(L.t('reload'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                        ),
+                      ),
+                    ),
+                  ]),
                 ]),
               ),
             ),
@@ -520,7 +587,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 _iconBox(Icons.person_rounded, onTap: () => _open(context, const AccountScreen())),
               ]),
               SizedBox(height: narrow ? 14 : 22),
-              if (!License.paid) _trialBanner(context),
               if (cont.isNotEmpty) ...[
                 _continueRow(context, cont, narrow),
                 SizedBox(height: narrow ? 14 : 20),
@@ -585,25 +651,6 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     ]);
-  }
-
-  Widget _trialBanner(BuildContext c) {
-    final d = License.daysLeft;
-    return GestureDetector(
-      onTap: () => Navigator.of(c).push(MaterialPageRoute(builder: (_) => const PaywallScreen())),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 14),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
-        decoration: BoxDecoration(color: kBlue.withValues(alpha: .12), borderRadius: BorderRadius.circular(12), border: Border.all(color: kBlue.withValues(alpha: .45))),
-        child: Row(children: [
-          const Icon(Icons.hourglass_bottom_rounded, color: kBlue, size: 18),
-          const SizedBox(width: 10),
-          Expanded(child: Text(d <= 1 ? L.t('last_free_day') : '$d ${L.t('free_days_left')}', style: const TextStyle(color: kText, fontSize: 14, fontWeight: FontWeight.w600))),
-          Text(L.t('unlock'), style: const TextStyle(color: kBlue, fontSize: 13.5, fontWeight: FontWeight.w800)),
-          const Icon(Icons.chevron_right_rounded, color: kBlue, size: 20),
-        ]),
-      ),
-    );
   }
 
   Widget _grid(BuildContext context, bool narrow) {
