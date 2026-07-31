@@ -43,7 +43,7 @@ class VelaApp extends StatelessWidget {
         title: 'Vela',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(useMaterial3: true, brightness: Brightness.dark, scaffoldBackgroundColor: kBg, fontFamily: 'Roboto'),
-        home: Session.account == null ? const ConnectScreen() : const HomeScreen(),
+        home: Session.account == null ? const ActivationScreen() : const HomeScreen(),
       ),
     );
   }
@@ -129,7 +129,111 @@ class VelaLogo extends StatelessWidget {
   }
 }
 
-// ============================ VERBINDEN ============================
+// ============================ AKTIVIERUNG (velaplayer.com-Modell) ============================
+class ActivationScreen extends StatefulWidget {
+  const ActivationScreen({super.key});
+  @override
+  State<ActivationScreen> createState() => _ActivationScreenState();
+}
+
+class _ActivationScreenState extends State<ActivationScreen> {
+  bool busy = false;
+  String? msg;
+
+  Future<void> _check() async {
+    setState(() { busy = true; msg = null; });
+    final a = await Session.activationLookup();
+    if (a != null) {
+      final info = await Xtream.userInfo(a);
+      if (info != null) {
+        await Session.save(a);
+        if (!mounted) return;
+        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const HomeScreen()));
+        return;
+      }
+    }
+    if (mounted) setState(() { busy = false; msg = L.t('activate_pending'); });
+  }
+
+  Widget _step(String n, String text) => Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Container(width: 26, height: 26, alignment: Alignment.center, decoration: BoxDecoration(color: kBlue.withValues(alpha: .16), borderRadius: BorderRadius.circular(13)), child: Text(n, style: const TextStyle(color: kBlue, fontWeight: FontWeight.w800, fontSize: 13))),
+          const SizedBox(width: 12),
+          Expanded(child: Padding(padding: const EdgeInsets.only(top: 3), child: Text(text, style: const TextStyle(color: kText, fontSize: 14.5, height: 1.3)))),
+        ]),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        decoration: _bgDeco(),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 560),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  const VelaLogo(size: 44),
+                  const SizedBox(height: 16),
+                  Text(L.t('welcome'), textAlign: TextAlign.center, style: const TextStyle(color: kText, fontSize: 22, fontWeight: FontWeight.w800, fontFamily: 'serif')),
+                  const SizedBox(height: 4),
+                  Text(L.t('activate_intro'), style: const TextStyle(color: kMuted, fontSize: 13.5)),
+                  const SizedBox(height: 20),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+                    decoration: BoxDecoration(color: kPanel, borderRadius: BorderRadius.circular(14), border: Border.all(color: kLine)),
+                    child: Row(children: [
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(L.t('device_code'), style: const TextStyle(color: kMuted, fontSize: 12)),
+                        const SizedBox(height: 4),
+                        Text(Session.deviceCode, style: const TextStyle(color: kBlue, fontSize: 24, fontWeight: FontWeight.w800, letterSpacing: 2, fontFamily: 'monospace')),
+                      ])),
+                      IconButton(
+                        onPressed: () async {
+                          final messenger = ScaffoldMessenger.of(context);
+                          await Clipboard.setData(ClipboardData(text: Session.deviceCode));
+                          messenger.showSnackBar(SnackBar(backgroundColor: kPanel, content: Text(L.t('copied'), style: const TextStyle(color: kText))));
+                        },
+                        icon: const Icon(Icons.copy_rounded, color: kMuted),
+                      ),
+                    ]),
+                  ),
+                  const SizedBox(height: 22),
+                  _step('1', '${L.t('activate_s1')}  $kPortal'),
+                  _step('2', L.t('activate_s2')),
+                  _step('3', L.t('activate_s3')),
+                  const SizedBox(height: 8),
+                  if (msg != null) Padding(padding: const EdgeInsets.only(bottom: 12), child: Text(msg!, textAlign: TextAlign.center, style: const TextStyle(color: Color(0xFFF2A0A0), fontSize: 13))),
+                  SizedBox(
+                    width: double.infinity, height: 50,
+                    child: FilledButton(
+                      style: FilledButton.styleFrom(backgroundColor: kBlue, foregroundColor: kBg, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11))),
+                      onPressed: busy ? null : _check,
+                      child: busy
+                          ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: kBg))
+                          : Text(L.t('activate_check'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextButton(
+                    onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ConnectScreen())),
+                    child: Text(L.t('activate_manual'), style: const TextStyle(color: kMuted, fontSize: 13)),
+                  ),
+                ]),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================ VERBINDEN (manuell/Test) ============================
 class ConnectScreen extends StatefulWidget {
   const ConnectScreen({super.key});
   @override
@@ -154,7 +258,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
     }
     await Session.save(a);
     if (!mounted) return;
-    Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const HomeScreen()));
+    Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const HomeScreen()), (_) => false);
   }
 
   @override
@@ -1754,7 +1858,7 @@ class _AccountScreenState extends State<AccountScreen> {
   Future<void> _logout() async {
     await Session.clear();
     if (!mounted) return;
-    Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const ConnectScreen()), (_) => false);
+    Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const ActivationScreen()), (_) => false);
   }
 
   @override

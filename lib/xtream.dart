@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import 'dart:ui' show PlatformDispatcher;
 import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
@@ -6,6 +7,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 /// Proxy auf dem Hub (umgeht CORS, holt Provider-Daten server-zu-server).
 const String kProxy = 'https://hub.mtplyr.com/api/xt.php';
+
+/// Aktivierung: Hub-Endpunkt, der zu einem Geräte-Code die verknüpfte Playlist zurückgibt.
+const String kActivate = 'https://hub.mtplyr.com/api/vela_activate.php';
+
+/// Portal, auf dem Nutzer ihre Playlist (M3U/Xtream) mit dem Code hochladen.
+const String kPortal = 'velaplayer.com';
 
 class Account {
   final String host, user, pass;
@@ -15,6 +22,7 @@ class Account {
 /// Aktuelle Sitzung (Zugangsdaten), persistiert.
 class Session {
   static Account? account;
+  static String deviceCode = '';
 
   static Future<void> load() async {
     final p = await SharedPreferences.getInstance();
@@ -22,6 +30,33 @@ class Session {
     final u = p.getString('xt_user');
     final pw = p.getString('xt_pass');
     if (h != null && u != null && pw != null) account = Account(h, u, pw);
+    deviceCode = p.getString('device_code') ?? '';
+    if (deviceCode.isEmpty) {
+      deviceCode = _genCode();
+      await p.setString('device_code', deviceCode);
+    }
+  }
+
+  static String _genCode() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // ohne verwechselbare (0/O, 1/I)
+    final r = Random.secure();
+    final b = List.generate(12, (_) => chars[r.nextInt(chars.length)]);
+    return '${b.sublist(0, 4).join()}-${b.sublist(4, 8).join()}-${b.sublist(8, 12).join()}';
+  }
+
+  /// Fragt den Hub, ob dem Geräte-Code bereits eine Playlist zugewiesen wurde.
+  static Future<Account?> activationLookup() async {
+    try {
+      final uri = Uri.parse(kActivate).replace(queryParameters: {'code': deviceCode});
+      final r = await http.get(uri).timeout(const Duration(seconds: 15));
+      if (r.statusCode == 200) {
+        final j = jsonDecode(r.body);
+        if (j is Map && '${j['host'] ?? ''}'.isNotEmpty) {
+          return Account('${j['host']}', '${j['username'] ?? j['user'] ?? ''}', '${j['password'] ?? j['pass'] ?? ''}');
+        }
+      }
+    } catch (_) {}
+    return null;
   }
 
   static Future<void> save(Account a) async {
