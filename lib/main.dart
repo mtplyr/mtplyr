@@ -18,6 +18,7 @@ void main() async {
   await Prefs.load();
   await ResumeStore.load();
   await ContinueStore.load();
+  await License.load();
   runApp(const VelaApp());
 }
 
@@ -43,7 +44,7 @@ class VelaApp extends StatelessWidget {
         title: 'Vela',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(useMaterial3: true, brightness: Brightness.dark, scaffoldBackgroundColor: kBg, fontFamily: 'Roboto'),
-        home: Session.account == null ? const ActivationScreen() : const HomeScreen(),
+        home: Session.account == null ? const ActivationScreen() : const HomeGate(),
       ),
     );
   }
@@ -129,6 +130,157 @@ class VelaLogo extends StatelessWidget {
   }
 }
 
+// ============================ GATE: entscheidet Home / Paywall / Playlist abgelaufen ============================
+class HomeGate extends StatefulWidget {
+  const HomeGate({super.key});
+  @override
+  State<HomeGate> createState() => _HomeGateState();
+}
+
+class _HomeGateState extends State<HomeGate> {
+  bool loading = true;
+  bool playlistExpired = false;
+
+  @override
+  void initState() { super.initState(); _check(); }
+
+  Future<void> _check() async {
+    await License.startTrial();
+    bool exp = License.simExpiredPlaylist;
+    if (!exp && Session.account != null) {
+      try {
+        final i = await Xtream.userInfo(Session.account!);
+        if (i != null) {
+          final status = '${i['status'] ?? ''}'.toLowerCase();
+          final expTs = int.tryParse('${i['exp_date'] ?? ''}');
+          exp = (status.isNotEmpty && status != 'active') ||
+              (expTs != null && expTs > 0 && DateTime.fromMillisecondsSinceEpoch(expTs * 1000).isBefore(DateTime.now()));
+        }
+      } catch (_) {}
+    }
+    if (mounted) setState(() { playlistExpired = exp; loading = false; });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (loading) return Scaffold(body: Container(decoration: _bgDeco(), child: _loading()));
+    if (playlistExpired) return const PlaylistExpiredScreen();
+    if (License.trialExpired) return const PaywallScreen();
+    return const HomeScreen();
+  }
+}
+
+// ============================ PAYWALL (Trial abgelaufen) ============================
+class PaywallScreen extends StatelessWidget {
+  const PaywallScreen({super.key});
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        decoration: _bgDeco(),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 460),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  const VelaLogo(size: 44),
+                  const SizedBox(height: 22),
+                  Container(width: 72, height: 72, decoration: BoxDecoration(color: kBlue.withValues(alpha: .14), borderRadius: BorderRadius.circular(20)), child: const Icon(Icons.lock_rounded, color: kBlue, size: 36)),
+                  const SizedBox(height: 16),
+                  Text(L.t('paywall_title'), textAlign: TextAlign.center, style: const TextStyle(color: kText, fontSize: 22, fontWeight: FontWeight.w800, fontFamily: 'serif')),
+                  const SizedBox(height: 6),
+                  Text(L.t('paywall_body'), textAlign: TextAlign.center, style: const TextStyle(color: kMuted, fontSize: 13.5, height: 1.4)),
+                  const SizedBox(height: 22),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+                    decoration: BoxDecoration(color: kPanel, borderRadius: BorderRadius.circular(14), border: Border.all(color: kBlue)),
+                    child: Row(children: [
+                      Expanded(child: Text('Vela · ${L.t('lifetime')}', style: const TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w700))),
+                      const Text('10 €', style: TextStyle(color: kBlue, fontSize: 24, fontWeight: FontWeight.w800)),
+                    ]),
+                  ),
+                  const SizedBox(height: 18),
+                  SizedBox(
+                    width: double.infinity, height: 52,
+                    child: FilledButton(
+                      style: FilledButton.styleFrom(backgroundColor: kBlue, foregroundColor: kBg, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                      onPressed: () async {
+                        await License.setPaid(true); // TEST/Fake – auf iOS später Apple In-App-Kauf
+                        if (context.mounted) Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const HomeGate()));
+                      },
+                      child: Text('${L.t('buy_now')} · 10 €', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  TextButton(
+                    onPressed: () async {
+                      await License.setPaid(true);
+                      if (context.mounted) Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const HomeGate()));
+                    },
+                    child: Text(L.t('restore'), style: const TextStyle(color: kMuted, fontSize: 13)),
+                  ),
+                ]),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================ PLAYLIST ABGELAUFEN (Anbieter) ============================
+class PlaylistExpiredScreen extends StatelessWidget {
+  const PlaylistExpiredScreen({super.key});
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        decoration: _bgDeco(),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 460),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  const VelaLogo(size: 44),
+                  const SizedBox(height: 22),
+                  Container(width: 72, height: 72, decoration: BoxDecoration(color: const Color(0xFFE0B366).withValues(alpha: .16), borderRadius: BorderRadius.circular(20)), child: const Icon(Icons.event_busy_rounded, color: Color(0xFFE0B366), size: 36)),
+                  const SizedBox(height: 16),
+                  Text(L.t('playlist_expired_title'), textAlign: TextAlign.center, style: const TextStyle(color: kText, fontSize: 22, fontWeight: FontWeight.w800, fontFamily: 'serif')),
+                  const SizedBox(height: 6),
+                  Text(L.t('playlist_expired_body'), textAlign: TextAlign.center, style: const TextStyle(color: kMuted, fontSize: 13.5, height: 1.4)),
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity, height: 50,
+                    child: FilledButton(
+                      style: FilledButton.styleFrom(backgroundColor: kBlue, foregroundColor: kBg, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11))),
+                      onPressed: () => Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const HomeGate())),
+                      child: Text(L.t('recheck'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextButton(
+                    onPressed: () async {
+                      await Session.clear();
+                      if (context.mounted) Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const ActivationScreen()), (_) => false);
+                    },
+                    child: Text(L.t('logout'), style: const TextStyle(color: kMuted, fontSize: 13)),
+                  ),
+                ]),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ============================ AKTIVIERUNG (velaplayer.com-Modell) ============================
 class ActivationScreen extends StatefulWidget {
   const ActivationScreen({super.key});
@@ -147,8 +299,9 @@ class _ActivationScreenState extends State<ActivationScreen> {
       final info = await Xtream.userInfo(a);
       if (info != null) {
         await Session.save(a);
+        await License.startTrial();
         if (!mounted) return;
-        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const HomeScreen()));
+        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const HomeGate()));
         return;
       }
     }
@@ -263,8 +416,9 @@ class _ConnectScreenState extends State<ConnectScreen> {
       return;
     }
     await Session.save(a);
+    await License.startTrial();
     if (!mounted) return;
-    Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const HomeScreen()), (_) => false);
+    Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const HomeGate()), (_) => false);
   }
 
   @override
@@ -366,6 +520,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 _iconBox(Icons.person_rounded, onTap: () => _open(context, const AccountScreen())),
               ]),
               SizedBox(height: narrow ? 14 : 22),
+              if (!License.paid) _trialBanner(context),
               if (cont.isNotEmpty) ...[
                 _continueRow(context, cont, narrow),
                 SizedBox(height: narrow ? 14 : 20),
@@ -430,6 +585,25 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     ]);
+  }
+
+  Widget _trialBanner(BuildContext c) {
+    final d = License.daysLeft;
+    return GestureDetector(
+      onTap: () => Navigator.of(c).push(MaterialPageRoute(builder: (_) => const PaywallScreen())),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+        decoration: BoxDecoration(color: kBlue.withValues(alpha: .12), borderRadius: BorderRadius.circular(12), border: Border.all(color: kBlue.withValues(alpha: .45))),
+        child: Row(children: [
+          const Icon(Icons.hourglass_bottom_rounded, color: kBlue, size: 18),
+          const SizedBox(width: 10),
+          Expanded(child: Text(d <= 1 ? L.t('last_free_day') : '$d ${L.t('free_days_left')}', style: const TextStyle(color: kText, fontSize: 14, fontWeight: FontWeight.w600))),
+          Text(L.t('unlock'), style: const TextStyle(color: kBlue, fontSize: 13.5, fontWeight: FontWeight.w800)),
+          const Icon(Icons.chevron_right_rounded, color: kBlue, size: 20),
+        ]),
+      ),
+    );
   }
 
   Widget _grid(BuildContext context, bool narrow) {
@@ -1544,7 +1718,7 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   int sel = 0;
-  List<String> get items => [L.t('s_stream_format'), L.t('s_buffer'), L.t('s_subsize'), L.t('s_language'), L.t('s_parental'), L.t('s_hidden'), L.t('favorites'), L.t('s_about')];
+  List<String> get items => [L.t('s_stream_format'), L.t('s_buffer'), L.t('s_subsize'), L.t('s_language'), L.t('s_parental'), L.t('s_hidden'), L.t('favorites'), L.t('s_about'), '🧪 Test / Simulation'];
 
   @override
   Widget build(BuildContext context) {
@@ -1599,7 +1773,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       case 4: return _parental();
       case 5: return const _HiddenCats();
       case 6: return _favs();
-      default: return _about();
+      case 7: return _about();
+      default: return _test();
     }
   }
 
@@ -1769,8 +1944,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget _about() => _panel(Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: const [
         Text('Vela Player', style: TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w700)),
         SizedBox(height: 8),
-        Text('Version 1.0.1 · Beta', style: TextStyle(color: kMuted, fontSize: 13)),
+        Text('Version 1.0 · Beta', style: TextStyle(color: kMuted, fontSize: 13)),
       ]));
+
+  void _goGate() => Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const HomeGate()), (_) => false);
+
+  Widget _testBtn(String label, VoidCallback onTap) => Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: SizedBox(
+          width: double.infinity,
+          child: OutlinedButton(
+            style: OutlinedButton.styleFrom(side: const BorderSide(color: kLine), alignment: Alignment.centerLeft, padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12)),
+            onPressed: onTap,
+            child: Text(label, style: const TextStyle(color: kText, fontSize: 13.5)),
+          ),
+        ),
+      );
+
+  Widget _test() {
+    final state = License.paid
+        ? 'bezahlt (freigeschaltet)'
+        : '${License.daysLeft} Tage übrig${License.trialExpired ? ' – ABGELAUFEN' : ''}';
+    return _panel(Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+      const Text('🧪 Test / Simulation', style: TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w700)),
+      const SizedBox(height: 4),
+      const Text('Nur zum Durchtesten des Kunden-Ablaufs (vor Release entfernen).', style: TextStyle(color: kMuted, fontSize: 12.5)),
+      const SizedBox(height: 8),
+      Text('Trial: $state', style: const TextStyle(color: kBlue, fontSize: 13, fontWeight: FontWeight.w600)),
+      Text('Playlist-Ablauf simuliert: ${License.simExpiredPlaylist ? 'JA' : 'nein'}', style: const TextStyle(color: kMuted, fontSize: 12)),
+      const SizedBox(height: 12),
+      _testBtn('① Trial zurücksetzen (10 Tage, wie Neukunde)', () async { await License.resetTrial(); _goGate(); }),
+      _testBtn('② Trial ablaufen lassen → Paywall', () async { await License.expireTrial(); _goGate(); }),
+      _testBtn(License.paid ? '③ Als UNbezahlt markieren' : '③ Als bezahlt markieren (Freischaltung)', () async { await License.setPaid(!License.paid); _goGate(); }),
+      _testBtn(License.simExpiredPlaylist ? '④ Playlist-Ablauf AUS' : '④ Playlist als abgelaufen simulieren', () async { await License.setSimExpired(!License.simExpiredPlaylist); _goGate(); }),
+    ]));
+  }
 }
 
 class _HiddenCats extends StatefulWidget {

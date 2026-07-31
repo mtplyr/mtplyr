@@ -374,6 +374,45 @@ class Prefs {
   static bool visible(String name) => !hidden.contains(name) && !(hideAdult && isAdult(name));
 }
 
+/// Vela-Lizenz/Trial (lokal, persistiert). 10 Tage gratis ab erstem Verbinden,
+/// danach Freischaltung (Lifetime). Playlist-Ablauf kommt separat vom Anbieter (exp_date).
+class License {
+  static const int trialDays = 10;
+  static DateTime? trialStart;
+  static bool paid = false;
+  static bool simExpiredPlaylist = false; // nur zum Testen
+
+  static Future<void> load() async {
+    final p = await SharedPreferences.getInstance();
+    final ms = p.getInt('trial_start');
+    trialStart = ms != null ? DateTime.fromMillisecondsSinceEpoch(ms) : null;
+    paid = p.getBool('lic_paid') ?? false;
+    simExpiredPlaylist = p.getBool('sim_expired') ?? false;
+  }
+
+  static Future<void> startTrial() async {
+    if (trialStart != null) return;
+    trialStart = DateTime.now();
+    final p = await SharedPreferences.getInstance();
+    await p.setInt('trial_start', trialStart!.millisecondsSinceEpoch);
+  }
+
+  static int get daysLeft {
+    if (paid || trialStart == null) return trialDays;
+    final used = DateTime.now().difference(trialStart!).inDays;
+    return (trialDays - used).clamp(0, trialDays);
+  }
+
+  static bool get trialExpired =>
+      !paid && trialStart != null && DateTime.now().difference(trialStart!).inDays >= trialDays;
+
+  // ---- Test-Schalter ----
+  static Future<void> setPaid(bool v) async { paid = v; final p = await SharedPreferences.getInstance(); await p.setBool('lic_paid', v); }
+  static Future<void> resetTrial() async { trialStart = DateTime.now(); paid = false; final p = await SharedPreferences.getInstance(); await p.setInt('trial_start', trialStart!.millisecondsSinceEpoch); await p.setBool('lic_paid', false); }
+  static Future<void> expireTrial() async { trialStart = DateTime.now().subtract(const Duration(days: trialDays + 1)); paid = false; final p = await SharedPreferences.getInstance(); await p.setInt('trial_start', trialStart!.millisecondsSinceEpoch); await p.setBool('lic_paid', false); }
+  static Future<void> setSimExpired(bool v) async { simExpiredPlaylist = v; final p = await SharedPreferences.getInstance(); await p.setBool('sim_expired', v); }
+}
+
 /// Wiedergabe-Position merken (Weiterschauen), persistiert. Schlüssel = Stream-URL.
 class ResumeStore {
   static Map<String, int> _pos = {};
