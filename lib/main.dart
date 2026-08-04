@@ -44,7 +44,7 @@ class VelaApp extends StatelessWidget {
         title: 'Vela',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(useMaterial3: true, brightness: Brightness.dark, scaffoldBackgroundColor: kBg, fontFamily: 'Roboto'),
-        home: Session.account == null ? const ActivationScreen() : const HomeGate(),
+        home: !Session.isReady ? const ActivationScreen() : const HomeGate(),
       ),
     );
   }
@@ -174,6 +174,7 @@ class _HomeGateState extends State<HomeGate> {
 
   Future<void> _check() async {
     await License.startTrial();
+    await License.syncFromServer(); // Trial/paid an MAC gebunden (Server = Wahrheit)
     bool exp = License.simExpiredPlaylist;
     if (!exp && Session.account != null) {
       try {
@@ -361,16 +362,12 @@ class _ActivationScreenState extends State<ActivationScreen> {
 
   Future<void> _check() async {
     setState(() { busy = true; msg = null; });
-    final a = await Session.activationLookup();
-    if (a != null) {
-      final info = await Xtream.userInfo(a);
-      if (info != null) {
-        await Session.save(a);
-        await License.startTrial();
-        if (!mounted) return;
-        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const HomeGate()));
-        return;
-      }
+    final ok = await Session.pullActivation(); // Xtream ODER M3U
+    if (ok) {
+      await License.startTrial();
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const HomeGate()));
+      return;
     }
     if (mounted) setState(() { busy = false; msg = L.t('activate_pending'); });
   }
@@ -1765,7 +1762,7 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   int sel = 0;
-  List<String> get items => [L.t('s_stream_format'), L.t('s_buffer'), L.t('s_subsize'), L.t('s_language'), L.t('s_parental'), L.t('s_hidden'), L.t('favorites'), L.t('s_about'), '🧪 Test / Simulation'];
+  List<String> get items => [L.t('s_stream_format'), L.t('s_buffer'), L.t('s_subsize'), L.t('s_language'), L.t('s_parental'), L.t('s_hidden'), L.t('favorites'), L.t('s_about')];
 
   @override
   Widget build(BuildContext context) {
@@ -1821,7 +1818,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       case 5: return const _HiddenCats();
       case 6: return _favs();
       case 7: return _about();
-      default: return _test();
+      default: return _about();
     }
   }
 
@@ -1994,38 +1991,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         Text('Version 1.0 · Beta', style: TextStyle(color: kMuted, fontSize: 13)),
       ]));
 
-  void _goGate() => Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const HomeGate()), (_) => false);
-
-  Widget _testBtn(String label, VoidCallback onTap) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: SizedBox(
-          width: double.infinity,
-          child: OutlinedButton(
-            style: OutlinedButton.styleFrom(side: const BorderSide(color: kLine), alignment: Alignment.centerLeft, padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12)),
-            onPressed: onTap,
-            child: Text(label, style: const TextStyle(color: kText, fontSize: 13.5)),
-          ),
-        ),
-      );
-
-  Widget _test() {
-    final state = License.paid
-        ? 'bezahlt (freigeschaltet)'
-        : '${License.daysLeft} Tage übrig${License.trialExpired ? ' – ABGELAUFEN' : ''}';
-    return _panel(Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-      const Text('🧪 Test / Simulation', style: TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w700)),
-      const SizedBox(height: 4),
-      const Text('Nur zum Durchtesten des Kunden-Ablaufs (vor Release entfernen).', style: TextStyle(color: kMuted, fontSize: 12.5)),
-      const SizedBox(height: 8),
-      Text('Trial: $state', style: const TextStyle(color: kBlue, fontSize: 13, fontWeight: FontWeight.w600)),
-      Text('Playlist-Ablauf simuliert: ${License.simExpiredPlaylist ? 'JA' : 'nein'}', style: const TextStyle(color: kMuted, fontSize: 12)),
-      const SizedBox(height: 12),
-      _testBtn('① Trial zurücksetzen (10 Tage, wie Neukunde)', () async { await License.resetTrial(); _goGate(); }),
-      _testBtn('② Trial ablaufen lassen → Paywall', () async { await License.expireTrial(); _goGate(); }),
-      _testBtn(License.paid ? '③ Als UNbezahlt markieren' : '③ Als bezahlt markieren (Freischaltung)', () async { await License.setPaid(!License.paid); _goGate(); }),
-      _testBtn(License.simExpiredPlaylist ? '④ Playlist-Ablauf AUS' : '④ Playlist als abgelaufen simulieren', () async { await License.setSimExpired(!License.simExpiredPlaylist); _goGate(); }),
-    ]));
-  }
 }
 
 class _HiddenCats extends StatefulWidget {
@@ -2112,7 +2077,7 @@ class _AccountScreenState extends State<AccountScreen> {
   }
 
   Future<void> _load() async {
-    final i = await Xtream.userInfo(Session.account!);
+    final i = Session.account != null ? await Xtream.userInfo(Session.account!) : null;
     if (mounted) setState(() { info = i; loading = false; });
   }
 
@@ -2127,8 +2092,8 @@ class _AccountScreenState extends State<AccountScreen> {
     final i = info ?? {};
     final status = (i['status'] ?? '').toString();
     final data = [
-      [L.t('username'), Session.account!.user, Icons.person_rounded, false],
-      [L.t('acc_status'), status.isEmpty ? '—' : status, Icons.cloud_done_rounded, status.toLowerCase() == 'active'],
+      [L.t('username'), Session.account?.user ?? 'M3U-Playlist', Icons.person_rounded, false],
+      [L.t('acc_status'), Session.mode == 'm3u' ? 'M3U (${Session.m3u.length} Sender)' : (status.isEmpty ? '—' : status), Icons.cloud_done_rounded, status.toLowerCase() == 'active' || Session.mode == 'm3u'],
       [L.t('acc_connections'), '${i['active_cons'] ?? 0} / ${i['max_connections'] ?? '?'}', Icons.link_rounded, false],
       [L.t('acc_expires'), _tsDate(i['exp_date']), Icons.event_rounded, false],
       [L.t('acc_trial'), ('${i['is_trial']}' == '1') ? L.t('yes') : L.t('no'), Icons.verified_user_rounded, false],

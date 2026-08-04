@@ -14,6 +14,9 @@ const bool kOnWeb = identical(0, 0.0);
 /// Aktivierung: Hub-Endpunkt, der zu einem Geräte-Code die verknüpfte Playlist zurückgibt.
 const String kActivate = 'https://hub.mtplyr.com/api/vela_activate.php';
 
+/// Lizenz-/Trial-Status (an die MAC gebunden, serverseitig) — Quelle der Wahrheit.
+const String kLicense = 'https://hub.mtplyr.com/api/license_status.php';
+
 /// Portal, auf dem Nutzer ihre Playlist (M3U/Xtream) mit dem Code hochladen.
 const String kPortal = 'velaplayer.com';
 
@@ -22,11 +25,25 @@ class Account {
   Account(this.host, this.user, this.pass);
 }
 
+/// Ein Sender aus einer M3U-Playlist (direkte Stream-URL, kein Xtream).
+class M3uChannel {
+  final String name, logo, group, url;
+  M3uChannel(this.name, this.logo, this.group, this.url);
+}
+
 /// Aktuelle Sitzung (Zugangsdaten), persistiert.
 class Session {
   static Account? account;
   static String mac = '';
   static String deviceKey = '';
+
+  // Playlist-Quelle: 'xtream' (Account/Proxy) oder 'm3u' (direkte Senderliste).
+  static String mode = 'xtream';
+  static List<M3uChannel> m3u = [];
+  static String m3uUrl = '';
+
+  /// Ist eine Playlist eingerichtet? (Xtream ODER M3U)
+  static bool get isReady => mode == 'm3u' ? m3u.isNotEmpty : account != null;
 
   static Future<void> load() async {
     final p = await SharedPreferences.getInstance();
@@ -38,6 +55,10 @@ class Session {
     deviceKey = p.getString('device_key') ?? '';
     if (mac.isEmpty) { mac = _genMac(); await p.setString('device_mac', mac); }
     if (deviceKey.isEmpty) { deviceKey = _genKey(); await p.setString('device_key', deviceKey); }
+    // Playlist-Quelle wiederherstellen (M3U -> beim Start neu laden).
+    mode = p.getString('src_mode') ?? 'xtream';
+    m3uUrl = p.getString('m3u_url') ?? '';
+    if (mode == 'm3u' && m3uUrl.isNotEmpty) { await loadM3u(m3uUrl, persist: false); }
   }
 
   // Geräte-Identität wie vela/mtplyr/IBO: virtuelle MAC + Geräteschlüssel.
@@ -53,19 +74,72 @@ class Session {
     return List.generate(6, (_) => r.nextInt(10)).join();
   }
 
-  /// Fragt den Hub, ob dieser MAC/Key bereits eine Playlist zugewiesen bekommen hat.
-  static Future<Account?> activationLookup() async {
+  /// Holt die dem MAC/Key zugewiesene Playlist vom Hub und richtet die Sitzung ein.
+  /// Xtream -> Account (live validiert). Reine M3U -> Senderliste laden. true = bereit.
+  static Future<bool> pullActivation() async {
+    if (mac.isEmpty) return false;
     try {
       final uri = Uri.parse(kActivate).replace(queryParameters: {'mac': mac, 'key': deviceKey});
       final r = await http.get(uri).timeout(const Duration(seconds: 15));
-      if (r.statusCode == 200) {
-        final j = jsonDecode(r.body);
-        if (j is Map && '${j['host'] ?? ''}'.isNotEmpty) {
-          return Account('${j['host']}', '${j['username'] ?? j['user'] ?? ''}', '${j['password'] ?? j['pass'] ?? ''}');
-        }
+      if (r.statusCode != 200) return false;
+      final j = jsonDecode(r.body);
+      if (j is! Map) return false;
+      if ('${j['host'] ?? ''}'.isNotEmpty) {
+        final a = Account('${j['host']}', '${j['username'] ?? j['user'] ?? ''}', '${j['password'] ?? j['pass'] ?? ''}');
+        if (await Xtream.userInfo(a) == null) return false; // live prüfen
+        await save(a);
+        return true;
+      }
+      if (j['message'] == 'm3u_only' && '${j['raw_url'] ?? ''}'.isNotEmpty) {
+        return await loadM3u('${j['raw_url']}');
       }
     } catch (_) {}
-    return null;
+    return false;
+  }
+
+  /// M3U-Playlist von einer URL laden, parsen und als aktive Quelle setzen.
+  static Future<bool> loadM3u(String url, {bool persist = true}) async {
+    try {
+      final r = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 25));
+      if (r.statusCode != 200) return false;
+      final chans = parseM3u(r.body);
+      if (chans.isEmpty) return false;
+      m3u = chans; m3uUrl = url; mode = 'm3u'; account = null;
+      if (persist) {
+        final p = await SharedPreferences.getInstance();
+        await p.setString('src_mode', 'm3u');
+        await p.setString('m3u_url', url);
+        await p.remove('xt_host'); await p.remove('xt_user'); await p.remove('xt_pass');
+      }
+      return true;
+    } catch (_) { return false; }
+  }
+
+  /// Standard-M3U parsen: #EXTINF (tvg-logo, group-title, Name) + folgende URL-Zeile.
+  static List<M3uChannel> parseM3u(String text) {
+    final out = <M3uChannel>[];
+    String name = '', logo = '', group = '';
+    for (final raw in text.split(RegExp(r'\r?\n'))) {
+      final line = raw.trim();
+      if (line.isEmpty) continue;
+      if (line.startsWith('#EXTINF')) {
+        logo = _m3uAttr(line, 'tvg-logo');
+        group = _m3uAttr(line, 'group-title');
+        final comma = line.lastIndexOf(',');
+        name = comma >= 0 ? line.substring(comma + 1).trim() : '';
+      } else if (line.startsWith('#')) {
+        continue; // andere Direktiven ignorieren
+      } else {
+        out.add(M3uChannel(name.isEmpty ? line : name, logo, group.isEmpty ? 'Sender' : group, line));
+        name = ''; logo = ''; group = '';
+      }
+    }
+    return out;
+  }
+
+  static String _m3uAttr(String line, String key) {
+    final m = RegExp('$key="([^"]*)"').firstMatch(line);
+    return m != null ? m.group(1)! : '';
   }
 
   static Future<void> save(Account a) async {
@@ -73,7 +147,9 @@ class Session {
     await p.setString('xt_host', a.host);
     await p.setString('xt_user', a.user);
     await p.setString('xt_pass', a.pass);
-    account = a;
+    account = a; mode = 'xtream'; m3u = []; m3uUrl = '';
+    await p.setString('src_mode', 'xtream');
+    await p.remove('m3u_url');
   }
 
   static Future<void> clear() async {
@@ -81,7 +157,9 @@ class Session {
     await p.remove('xt_host');
     await p.remove('xt_user');
     await p.remove('xt_pass');
-    account = null;
+    await p.remove('src_mode');
+    await p.remove('m3u_url');
+    account = null; mode = 'xtream'; m3u = []; m3uUrl = '';
   }
 }
 
@@ -131,6 +209,12 @@ class Xtream {
   }
 
   static Future<List<Category>> categoriesRaw(String type) async {
+    if (Session.mode == 'm3u') {
+      if (type != 'live') return []; // M3U kennt keine VOD-/Serien-Kategorien
+      final seen = <String>{}; final out = <Category>[];
+      for (final c in Session.m3u) { if (seen.add(c.group)) out.add(Category(c.group, c.group)); }
+      return out;
+    }
     final action = type == 'live'
         ? 'live_categories'
         : type == 'vod'
@@ -150,6 +234,9 @@ class Xtream {
   }
 
   static Future<List<Item>> liveStreams(String catId) async {
+    if (Session.mode == 'm3u') {
+      return Session.m3u.where((c) => c.group == catId).map((c) => Item(c.url, c.name, c.logo)).toList();
+    }
     final j = await _get('live_streams', {'category_id': catId});
     if (j is! List) return [];
     return j
@@ -159,6 +246,7 @@ class Xtream {
   }
 
   static Future<List<Item>> vodStreams(String catId) async {
+    if (Session.mode == 'm3u') return [];
     final j = await _get('vod_streams', {'category_id': catId});
     if (j is! List) return [];
     return j
@@ -170,6 +258,7 @@ class Xtream {
 
   /// Alle Filme / Serien (ohne Kategorie) – für die globale Suche.
   static Future<List<Item>> allVod() async {
+    if (Session.mode == 'm3u') return [];
     final j = await _get('vod_streams');
     if (j is! List) return [];
     return j
@@ -180,6 +269,7 @@ class Xtream {
   }
 
   static Future<List<Item>> allSeries() async {
+    if (Session.mode == 'm3u') return [];
     final j = await _get('series');
     if (j is! List) return [];
     return j
@@ -189,6 +279,10 @@ class Xtream {
 
   /// Alle Live-Sender (ohne Kategorie) – für die globale Suche. Adult-Filter je nach Einstellung.
   static Future<List<Item>> allLive() async {
+    if (Session.mode == 'm3u') {
+      final all = Session.m3u.map((c) => Item(c.url, c.name, c.logo)).toList();
+      return Prefs.hideAdult ? all.where((c) => !Prefs.isAdult(c.name)).toList() : all;
+    }
     final j = await _get('live_streams');
     if (j is! List) return [];
     final list = j
@@ -199,6 +293,7 @@ class Xtream {
   }
 
   static Future<List<Item>> seriesList(String catId) async {
+    if (Session.mode == 'm3u') return [];
     final j = await _get('series', {'category_id': catId});
     if (j is! List) return [];
     return j
@@ -209,6 +304,7 @@ class Xtream {
 
   /// Stream-URLs fuer den Player (nativer Build).
   static String liveUrl(String streamId) {
+    if (Session.mode == 'm3u') return streamId; // bei M3U ist die ID bereits die direkte URL
     final a = Session.account!;
     return '${base(a.host)}/live/${a.user}/${a.pass}/$streamId.${Prefs.liveExt}';
   }
@@ -225,6 +321,7 @@ class Xtream {
 
   /// EPG-Archiv (vergangene Sendungen mit Aufzeichnung) eines Senders – für Catch-Up.
   static Future<List<Program>> archive(String streamId) async {
+    if (Session.mode == 'm3u') return []; // M3U hat kein EPG-Archiv
     final j = await _get('simple_data_table', {'stream_id': streamId});
     final list = (j is Map && j['epg_listings'] is List)
         ? j['epg_listings'] as List
@@ -263,6 +360,7 @@ class Xtream {
 
   /// Aktuell laufende Sendung (EPG) eines Live-Senders – Titel (base64-dekodiert).
   static Future<String> nowPlaying(String streamId) async {
+    if (Session.mode == 'm3u') return ''; // M3U hat kein EPG
     try {
       final j = await _get('short_epg', {'stream_id': streamId, 'limit': '1'});
       if (j is Map && j['epg_listings'] is List && (j['epg_listings'] as List).isNotEmpty) {
@@ -382,6 +480,12 @@ class License {
   static bool paid = false;
   static bool simExpiredPlaylist = false; // nur zum Testen
 
+  // Serverseitiger Status (an MAC gebunden). Wenn bekannt, ist er die Wahrheit;
+  // lokale trialStart-Logik bleibt nur Offline-Fallback.
+  static bool serverKnown = false;
+  static String serverStatus = ''; // trial | active | lifetime | expired | blocked
+  static int? serverDaysLeft;
+
   static Future<void> load() async {
     final p = await SharedPreferences.getInstance();
     final ms = p.getInt('trial_start');
@@ -397,19 +501,52 @@ class License {
     await p.setInt('trial_start', trialStart!.millisecondsSinceEpoch);
   }
 
+  /// Server-Status (an MAC gebunden) holen. Setzt paid/serverStatus/serverDaysLeft.
+  /// Schlaegt der Aufruf fehl (offline / Geraet noch nicht registriert), bleibt der
+  /// lokale Fallback aktiv.
+  static Future<void> syncFromServer() async {
+    if (Session.mac.isEmpty) return;
+    try {
+      final uri = Uri.parse(kLicense).replace(
+          queryParameters: {'mac': Session.mac, 'key': Session.deviceKey, 'brand': 'vela'});
+      final r = await http.get(uri).timeout(const Duration(seconds: 12));
+      if (r.statusCode != 200) return;
+      final j = jsonDecode(r.body);
+      if (j is Map && j['success'] == true && j['device'] is Map) {
+        serverKnown = true;
+        serverStatus = '${j['device']['license_status'] ?? ''}';
+        final dl = j['device']['days_left'];
+        serverDaysLeft = dl is int ? dl : int.tryParse('${dl ?? ''}');
+        final p = await SharedPreferences.getInstance();
+        if (j['paid'] == true) {
+          paid = true;
+          await p.setBool('lic_paid', true);
+        } else if (serverStatus == 'trial' || serverStatus == 'expired') {
+          paid = false;
+          await p.setBool('lic_paid', false);
+        }
+      }
+    } catch (_) {}
+  }
+
   static int get daysLeft {
-    if (paid || trialStart == null) return trialDays;
+    if (paid) return trialDays;
+    if (serverKnown && serverDaysLeft != null) return serverDaysLeft!.clamp(0, trialDays);
+    if (trialStart == null) return trialDays;
     final used = DateTime.now().difference(trialStart!).inDays;
     return (trialDays - used).clamp(0, trialDays);
   }
 
-  static bool get trialExpired =>
-      !paid && trialStart != null && DateTime.now().difference(trialStart!).inDays >= trialDays;
+  static bool get trialExpired {
+    if (paid) return false;
+    if (serverKnown) return serverStatus == 'expired' || (serverDaysLeft != null && serverDaysLeft! <= 0);
+    return trialStart != null && DateTime.now().difference(trialStart!).inDays >= trialDays;
+  }
 
   // ---- Test-Schalter ----
-  static Future<void> setPaid(bool v) async { paid = v; final p = await SharedPreferences.getInstance(); await p.setBool('lic_paid', v); }
-  static Future<void> resetTrial() async { trialStart = DateTime.now(); paid = false; final p = await SharedPreferences.getInstance(); await p.setInt('trial_start', trialStart!.millisecondsSinceEpoch); await p.setBool('lic_paid', false); }
-  static Future<void> expireTrial() async { trialStart = DateTime.now().subtract(const Duration(days: trialDays + 1)); paid = false; final p = await SharedPreferences.getInstance(); await p.setInt('trial_start', trialStart!.millisecondsSinceEpoch); await p.setBool('lic_paid', false); }
+  static Future<void> setPaid(bool v) async { serverKnown = false; paid = v; final p = await SharedPreferences.getInstance(); await p.setBool('lic_paid', v); }
+  static Future<void> resetTrial() async { serverKnown = false; trialStart = DateTime.now(); paid = false; final p = await SharedPreferences.getInstance(); await p.setInt('trial_start', trialStart!.millisecondsSinceEpoch); await p.setBool('lic_paid', false); }
+  static Future<void> expireTrial() async { serverKnown = false; trialStart = DateTime.now().subtract(const Duration(days: trialDays + 1)); paid = false; final p = await SharedPreferences.getInstance(); await p.setInt('trial_start', trialStart!.millisecondsSinceEpoch); await p.setBool('lic_paid', false); }
   static Future<void> setSimExpired(bool v) async { simExpiredPlaylist = v; final p = await SharedPreferences.getInstance(); await p.setBool('sim_expired', v); }
 }
 
