@@ -2111,24 +2111,30 @@ class _AccountScreenState extends State<AccountScreen> {
             ? _loading()
             : Padding(
                 padding: const EdgeInsets.all(20),
-                child: GridView.builder(
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: cols, mainAxisSpacing: 14, crossAxisSpacing: 14, mainAxisExtent: 64),
-                  itemCount: data.length,
-                  itemBuilder: (c, idx) {
-                    final ok = data[idx][3] as bool;
-                    return Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 18),
-                      decoration: BoxDecoration(color: kPanel.withValues(alpha: .5), borderRadius: BorderRadius.circular(12), border: Border.all(color: kLine)),
-                      child: Row(children: [
-                        Icon(data[idx][2] as IconData, color: kBlue, size: 22),
-                        const SizedBox(width: 14),
-                        Text(data[idx][0] as String, style: const TextStyle(color: kText, fontWeight: FontWeight.w700, fontSize: 15)),
-                        const Spacer(),
-                        Text(data[idx][1] as String, style: TextStyle(color: ok ? kOk : kText, fontWeight: FontWeight.w600, fontSize: 14.5)),
-                      ]),
-                    );
-                  },
-                ),
+                child: Column(children: [
+                  _idPanel(context), // MAC + Geräteschlüssel — immer sichtbar
+                  const SizedBox(height: 16),
+                  Expanded(
+                    child: GridView.builder(
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: cols, mainAxisSpacing: 14, crossAxisSpacing: 14, mainAxisExtent: 64),
+                      itemCount: data.length,
+                      itemBuilder: (c, idx) {
+                        final ok = data[idx][3] as bool;
+                        return Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 18),
+                          decoration: BoxDecoration(color: kPanel.withValues(alpha: .5), borderRadius: BorderRadius.circular(12), border: Border.all(color: kLine)),
+                          child: Row(children: [
+                            Icon(data[idx][2] as IconData, color: kBlue, size: 22),
+                            const SizedBox(width: 14),
+                            Text(data[idx][0] as String, style: const TextStyle(color: kText, fontWeight: FontWeight.w700, fontSize: 15)),
+                            const Spacer(),
+                            Text(data[idx][1] as String, style: TextStyle(color: ok ? kOk : kText, fontWeight: FontWeight.w600, fontSize: 14.5)),
+                          ]),
+                        );
+                      },
+                    ),
+                  ),
+                ]),
               ),
       ),
     );
