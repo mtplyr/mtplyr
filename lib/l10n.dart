@@ -90,6 +90,7 @@ class L {
     'player_err_title': ['Wiedergabe-Problem', 'Playback problem', 'Oynatma sorunu', 'مشكلة في التشغيل', 'Problème de lecture', 'Problema di riproduzione', 'Πρόβλημα αναπαραγωγής'],
     'go_back': ['Zurück', 'Back', 'Geri', 'رجوع', 'Retour', 'Indietro', 'Πίσω'],
     'volume': ['Lautstärke', 'Volume', 'Ses', 'الصوت', 'Volume', 'Volume', 'Ένταση'],
+    'track_auto': ['Automatisch', 'Automatic', 'Otomatik', 'تلقائي', 'Automatique', 'Automatico', 'Αυτόματο'],
     'now': ['Jetzt', 'Now', 'Şimdi', 'الآن', 'En ce moment', 'Ora', 'Τώρα'],
     'pick_audio': ['Audiospur wählen', 'Select audio track', 'Ses parçası seç', 'اختر المسار الصوتي', 'Choisir la piste audio', 'Seleziona traccia audio', 'Επιλογή ήχου'],
     'pick_subs': ['Untertitel wählen', 'Select subtitles', 'Altyazı seç', 'اختر الترجمة', 'Choisir les sous-titres', 'Seleziona sottotitoli', 'Επιλογή υποτίτλων'],

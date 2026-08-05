@@ -1796,11 +1796,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   String _trackLabel(dynamic t) {
+    final id = '${t.id}';
+    if (id == 'no') return L.t('off');   // Untertitel/Audio AUS
+    if (id == 'auto') return L.t('track_auto');
     final ttl = t.title as String?;
     final lang = t.language as String?;
     if (ttl != null && ttl.isNotEmpty) return ttl;
     if (lang != null && lang.isNotEmpty) return lang;
-    return '${t.id}';
+    return id;
   }
 
   @override
@@ -1875,7 +1878,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
             child: MaterialVideoControlsTheme(
               normal: controls,
               fullscreen: controls,
-              child: Video(controller: controller, fit: _fit, controls: _locked ? NoVideoControls : AdaptiveVideoControls),
+              // Überall UNSERE Steuerung (nicht die Desktop-Standard-Steuerung von
+              // media_kit) -> gleiche Buttons auf Windows/Handy/TV (Untertitel-Aus/An,
+              // Zappen, Sperre, Sleep, Format, Lautstärke).
+              child: Video(controller: controller, fit: _fit, controls: _locked ? NoVideoControls : MaterialVideoControls),
             ),
           ),
           // Immer sichtbarer Zurück-Button oben links (unabhängig von der Steuerleiste,
