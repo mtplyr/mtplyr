@@ -1,6 +1,6 @@
 // Erzeugt das grüne Nina-App-Icon (iOS) in allen benötigten Größen.
-// Motiv: diagonaler Teal-Verlauf + weißes Radar/Broadcast-Zeichen (Punkt + 2 Ringe),
-// passend zum In-App-Logo (Kreis + sensors-Icon).
+// Motiv: diagonaler Teal-Verlauf + weißer Play-Pfeil, der Broadcast-Wellen
+// "sendet" (Player + Live-Signal) — passend zur Marke Nina.
 //
 // Lauf:  dart run tool/gen_nina_icons.dart
 // Ausgabe: ios_nina_icons/Icon-App-*.png  (im Nina-Build über die Vela-Icons kopiert)
@@ -31,28 +31,44 @@ void main() {
   const S = 2048; // Supersample-Master -> beim Verkleinern glatte Kanten.
   final master = img.Image(width: S, height: S, numChannels: 3);
 
-  // Farben (Nina): Teal-Verlauf hell -> dunkel, weißes Motiv.
   const r1 = 95, g1 = 201, b1 = 166; // #5FC9A6
   const r2 = 62, g2 = 158, b2 = 134; // #3E9E86
-  final c = (S - 1) / 2.0;
-  final dotR = 0.100 * S;
-  final ring1i = 0.165 * S, ring1o = 0.225 * S;
-  final ring2i = 0.290 * S, ring2o = 0.350 * S;
 
+  // diagonaler Teal-Verlauf
   for (var y = 0; y < S; y++) {
     for (var x = 0; x < S; x++) {
-      // diagonaler Verlauf
       final t = (x + y) / (2 * (S - 1));
-      var r = (r1 + (r2 - r1) * t).round();
-      var g = (g1 + (g2 - g1) * t).round();
-      var b = (b1 + (b2 - b1) * t).round();
-      // weißes Radar-Zeichen
-      final d = sqrt((x - c) * (x - c) + (y - c) * (y - c));
-      final white = d <= dotR ||
-          (d >= ring1i && d <= ring1o) ||
-          (d >= ring2i && d <= ring2o);
-      if (white) { r = 255; g = 255; b = 255; }
-      master.setPixelRgb(x, y, r, g, b);
+      master.setPixelRgb(x, y,
+          (r1 + (r2 - r1) * t).round(),
+          (g1 + (g2 - g1) * t).round(),
+          (b1 + (b2 - b1) * t).round());
+    }
+  }
+
+  // Play-Dreieck (etwas nach rechts gesetzt, damit das Gesamtmotiv optisch mittig wirkt)
+  final apexX = 0.545 * S, apexY = 0.50 * S;
+  final leftX = 0.27 * S, topY = 0.30 * S, botY = 0.70 * S;
+  img.fillPolygon(master, vertices: [
+    img.Point(leftX, topY),
+    img.Point(leftX, botY),
+    img.Point(apexX, apexY),
+  ], color: img.ColorRgb8(255, 255, 255));
+
+  // Zwei Broadcast-Wellen rechts der Spitze (nach rechts offener Bogen)
+  const maxAng = 0.62; // ~35°
+  final bands = [
+    [0.100 * S, 0.140 * S],
+    [0.200 * S, 0.245 * S],
+  ];
+  for (var y = 0; y < S; y++) {
+    for (var x = 0; x < S; x++) {
+      final dx = x - apexX, dy = y - apexY;
+      if (dx <= 0) continue;
+      if (atan2(dy, dx).abs() > maxAng) continue;
+      final d = sqrt(dx * dx + dy * dy);
+      for (final band in bands) {
+        if (d >= band[0] && d <= band[1]) { master.setPixelRgb(x, y, 255, 255, 255); break; }
+      }
     }
   }
 
