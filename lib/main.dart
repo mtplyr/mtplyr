@@ -829,6 +829,26 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Icon(icon, color: kMuted, size: 24),
           ),
         );
+    Widget poster(Item it) => TvFocus(
+          radius: 12,
+          onTap: () => _open(context, isSeries ? SeriesDetailScreen(item: it) : MovieDetailScreen(item: it)),
+          child: SizedBox(
+            width: w,
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: SizedBox(
+                  width: w, height: h - 34,
+                  child: it.icon.isEmpty
+                      ? Container(color: kPanel2, child: Icon(isSeries ? Icons.theaters_rounded : Icons.movie_rounded, color: kMuted, size: 34))
+                      : Image.network(it.icon, fit: BoxFit.cover, errorBuilder: (_, _, _) => Container(color: kPanel2, child: Icon(isSeries ? Icons.theaters_rounded : Icons.movie_rounded, color: kMuted, size: 34))),
+                ),
+              ),
+              const SizedBox(height: 5),
+              Text(it.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kText, fontSize: 12.5, fontWeight: FontWeight.w600)),
+            ]),
+          ),
+        );
     return Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
       Padding(
         padding: const EdgeInsets.only(left: 4, bottom: 8),
@@ -836,41 +856,34 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       SizedBox(
         height: h,
-        child: Row(children: [
-          arrow(Icons.chevron_left_rounded, () => nudge(-1)),
-          Expanded(
-            child: ListView.separated(
-              controller: ctrl,
-              scrollDirection: Axis.horizontal,
-              itemCount: items.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 14),
-              itemBuilder: (ctx, i) {
-                final it = items[i];
-                return TvFocus(
-                  radius: 12,
-                  onTap: () => _open(context, isSeries ? SeriesDetailScreen(item: it) : MovieDetailScreen(item: it)),
-                  child: SizedBox(
-                    width: w,
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: SizedBox(
-                          width: w, height: h - 34,
-                          child: it.icon.isEmpty
-                              ? Container(color: kPanel2, child: Icon(isSeries ? Icons.theaters_rounded : Icons.movie_rounded, color: kMuted, size: 34))
-                              : Image.network(it.icon, fit: BoxFit.cover, errorBuilder: (_, _, _) => Container(color: kPanel2, child: Icon(isSeries ? Icons.theaters_rounded : Icons.movie_rounded, color: kMuted, size: 34))),
-                        ),
-                      ),
-                      const SizedBox(height: 5),
-                      Text(it.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kText, fontSize: 12.5, fontWeight: FontWeight.w600)),
-                    ]),
-                  ),
-                );
-              },
+        child: LayoutBuilder(builder: (c, cons) {
+          const gap = 14.0;
+          final content = items.length * w + (items.length - 1) * gap;
+          // Passt alles rein -> mittig, ohne Pfeile. Sonst -> Pfeile + scrollende Liste.
+          if (content <= cons.maxWidth) {
+            return Center(
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                for (int i = 0; i < items.length; i++) ...[
+                  if (i > 0) const SizedBox(width: gap),
+                  poster(items[i]),
+                ],
+              ]),
+            );
+          }
+          return Row(children: [
+            arrow(Icons.chevron_left_rounded, () => nudge(-1)),
+            Expanded(
+              child: ListView.separated(
+                controller: ctrl,
+                scrollDirection: Axis.horizontal,
+                itemCount: items.length,
+                separatorBuilder: (_, _) => const SizedBox(width: gap),
+                itemBuilder: (ctx, i) => poster(items[i]),
+              ),
             ),
-          ),
-          arrow(Icons.chevron_right_rounded, () => nudge(1)),
-        ]),
+            arrow(Icons.chevron_right_rounded, () => nudge(1)),
+          ]);
+        }),
       ),
     ]);
   }
