@@ -677,12 +677,18 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(width: 10),
                 _iconBox(Icons.person_rounded, onTap: () => _open(context, const AccountScreen())),
               ]),
-              SizedBox(height: narrow ? 14 : 22),
-              if (cont.isNotEmpty) ...[
-                _continueRow(context, cont, narrow),
-                SizedBox(height: narrow ? 14 : 20),
-              ],
-              Expanded(child: _grid(context, narrow)),
+              SizedBox(height: narrow ? 14 : 18),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Column(children: [
+                    if (cont.isNotEmpty) ...[
+                      _continueRow(context, cont, narrow),
+                      SizedBox(height: narrow ? 14 : 18),
+                    ],
+                    _grid(context, narrow),
+                  ]),
+                ),
+              ),
             ]),
           ),
         ),
@@ -746,19 +752,33 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _grid(BuildContext context, bool narrow) {
     final tiles = _tiles(context);
+    Widget card(int i) => _tileCard(tiles[i], autofocus: i == 0);
+    // Kacheln mit FESTER Höhe (mainAxisExtent) -> füllen nicht mehr den ganzen Bildschirm.
     if (narrow) {
-      return GridView.count(crossAxisCount: 2, mainAxisSpacing: 14, crossAxisSpacing: 14, childAspectRatio: 1.2, children: [for (int i = 0; i < tiles.length; i++) _tileCard(tiles[i], autofocus: i == 0)]);
+      return GridView.builder(
+        shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, mainAxisSpacing: 14, crossAxisSpacing: 14, mainAxisExtent: 160),
+        itemCount: tiles.length, itemBuilder: (c, i) => card(i),
+      );
     }
     if (kIsNina) {
       // Nina: 2x2-Raster (Vela hat eine Reihe mit 4) -> eigenständiger Aufbau.
-      return GridView.count(crossAxisCount: 2, mainAxisSpacing: 16, crossAxisSpacing: 16, childAspectRatio: 2.3, children: [for (int i = 0; i < tiles.length; i++) _tileCard(tiles[i], autofocus: i == 0)]);
+      return GridView.builder(
+        shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, mainAxisSpacing: 16, crossAxisSpacing: 16, mainAxisExtent: 175),
+        itemCount: tiles.length, itemBuilder: (c, i) => card(i),
+      );
     }
-    return Row(children: [
-      for (int i = 0; i < tiles.length; i++) ...[
-        Expanded(child: _tileCard(tiles[i], autofocus: i == 0)),
-        if (i < tiles.length - 1) const SizedBox(width: 16),
-      ],
-    ]);
+    // Vela breit: eine Reihe mit 4 Kacheln, Höhe begrenzt.
+    return SizedBox(
+      height: 200,
+      child: Row(children: [
+        for (int i = 0; i < tiles.length; i++) ...[
+          Expanded(child: card(i)),
+          if (i < tiles.length - 1) const SizedBox(width: 16),
+        ],
+      ]),
+    );
   }
 
   Widget _iconBox(IconData i, {VoidCallback? onTap}) => TvFocus(
@@ -1590,93 +1610,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _seeked = false;
   double _brightness = 0.5;
   BoxFit _fit = BoxFit.contain;
-  bool _locked = false;
-  bool _lockHint = false;
   bool _errShown = false; // verhindert gestapelte Fehler-Dialoge
-  Timer? _lockHintTimer;
-  Timer? _sleepTimer;
+  double _vol = 100; // Lautstärke 0..100 (Inline-Regler in der Leiste)
 
   void _cycleFit() => setState(() {
         _fit = _fit == BoxFit.contain ? BoxFit.cover : (_fit == BoxFit.cover ? BoxFit.fill : BoxFit.contain);
       });
 
-  void _lock() { setState(() => _locked = true); _showLockHint(); }
-  void _unlock() { _lockHintTimer?.cancel(); setState(() { _locked = false; _lockHint = false; }); }
-  void _showLockHint() {
-    setState(() => _lockHint = true);
-    _lockHintTimer?.cancel();
-    _lockHintTimer = Timer(const Duration(seconds: 3), () { if (mounted) setState(() => _lockHint = false); });
-  }
-
-  void _setSleep(int minutes) {
-    _sleepTimer?.cancel();
-    if (minutes > 0) {
-      _sleepTimer = Timer(Duration(minutes: minutes), () { if (mounted) Navigator.of(context).maybePop(); });
-    }
-  }
-
-  // Lautstärke-Regler (funktioniert auf allen Plattformen — am Desktop gibt es
-  // keine Wisch-Geste). Button in der Steuerleiste öffnet diesen Schieber.
-  void _volumeSheet() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: kPanel,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (_) => SafeArea(
-        child: StatefulBuilder(builder: (c, setSheet) {
-          final v = player.state.volume.clamp(0.0, 100.0);
-          return Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 20),
-            child: Row(children: [
-              IconButton(
-                icon: Icon(v <= 0 ? Icons.volume_off_rounded : Icons.volume_up_rounded, color: kBlue),
-                onPressed: () { player.setVolume(v <= 0 ? 100 : 0); setSheet(() {}); },
-              ),
-              Expanded(
-                child: Slider(
-                  value: v, min: 0, max: 100, activeColor: kBlue, inactiveColor: kLine,
-                  onChanged: (nv) { player.setVolume(nv); setSheet(() {}); },
-                ),
-              ),
-              SizedBox(width: 46, child: Text('${v.round()}%', textAlign: TextAlign.end, style: const TextStyle(color: kText, fontWeight: FontWeight.w600))),
-            ]),
-          );
-        }),
-      ),
-    );
-  }
-
-  void _sleepMenu() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: kPanel,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (_) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              const Icon(Icons.bedtime_rounded, color: kBlue, size: 18),
-              const SizedBox(width: 8),
-              Text(L.t('sleep_timer'), style: const TextStyle(color: kText, fontWeight: FontWeight.w700, fontSize: 16)),
-            ]),
-            const SizedBox(height: 16),
-            Wrap(spacing: 10, runSpacing: 10, children: [
-              for (final m in const [0, 15, 30, 45, 60, 90])
-                GestureDetector(
-                  onTap: () { _setSleep(m); Navigator.pop(context); if (mounted) setState(() {}); },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11),
-                    decoration: BoxDecoration(color: kPanel2, borderRadius: BorderRadius.circular(21), border: Border.all(color: kLine)),
-                    child: Text(m == 0 ? L.t('off') : '$m ${L.t('minutes_short')}', style: const TextStyle(color: kText, fontSize: 14, fontWeight: FontWeight.w600)),
-                  ),
-                ),
-            ]),
-          ]),
-        ),
-      ),
-    );
-  }
+  void _setVol(double v) { _vol = v.clamp(0, 100); player.setVolume(_vol); setState(() {}); }
 
   Future<void> _applySubScale() async {
     try { await (player.platform as dynamic).setProperty('sub-scale', Prefs.subScale.toStringAsFixed(2)); } catch (_) {}
@@ -1744,8 +1685,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
     _durSub?.cancel();
     _errSub?.cancel();
-    _sleepTimer?.cancel();
-    _lockHintTimer?.cancel();
     try { ScreenBrightness().resetApplicationScreenBrightness(); } catch (_) {}
     player.dispose();
     super.dispose();
@@ -1822,7 +1761,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       onBrightnessReset: () { try { ScreenBrightness().resetApplicationScreenBrightness(); } catch (_) {} },
       // Lautstärke-Geste (rechts): media_kit ruft nur diesen Callback – ohne ihn passiert nichts.
       initialVolume: (player.state.volume / 100).clamp(0.0, 1.0),
-      onVolumeChanged: (v) { player.setVolume((v * 100).clamp(0.0, 100.0)); },
+      onVolumeChanged: (v) { _vol = (v * 100).clamp(0.0, 100.0); player.setVolume(_vol); },
       // Steuerung verschwindet NICHT von allein (media_kit kann den Timer bei Button-Taps
       // nicht zurücksetzen). Sie bleibt offen, bis man aufs Bild tippt (dann aus). So verschwindet
       // beim Einstellen/Testen nichts mehr; Wischgesten bleiben aktiv.
@@ -1849,10 +1788,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
         if (live) MaterialCustomButton(onPressed: () => _zap(1), icon: const Icon(Icons.skip_next_rounded, color: Colors.white)),
         MaterialCustomButton(onPressed: () => _tracks(true), icon: const Icon(Icons.audiotrack_rounded, color: Colors.white)),
         MaterialCustomButton(onPressed: () => _tracks(false), icon: const Icon(Icons.closed_caption_rounded, color: Colors.white)),
-        MaterialCustomButton(onPressed: _volumeSheet, icon: const Icon(Icons.volume_up_rounded, color: Colors.white)),
+        // Lautstärke: Stummschalt-Icon + kompakter Inline-Regler (kein Popup).
+        MaterialCustomButton(onPressed: () => _setVol(_vol <= 0 ? 100 : 0), icon: Icon(_vol <= 0 ? Icons.volume_off_rounded : Icons.volume_up_rounded, color: Colors.white)),
+        SizedBox(
+          width: 96,
+          child: SliderTheme(
+            data: const SliderThemeData(trackHeight: 3, overlayShape: RoundSliderOverlayShape(overlayRadius: 12), thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6)),
+            child: Slider(value: _vol.clamp(0, 100), min: 0, max: 100, activeColor: kBlue, inactiveColor: Colors.white30, onChanged: _setVol),
+          ),
+        ),
         MaterialCustomButton(onPressed: _cycleFit, icon: const Icon(Icons.aspect_ratio_rounded, color: Colors.white)),
-        MaterialCustomButton(onPressed: _sleepMenu, icon: Icon(_sleepTimer?.isActive == true ? Icons.bedtime_rounded : Icons.bedtime_off_rounded, color: Colors.white)),
-        MaterialCustomButton(onPressed: _lock, icon: const Icon(Icons.lock_open_rounded, color: Colors.white)),
       ],
     );
     return Scaffold(
@@ -1862,9 +1807,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
         onKeyEvent: (node, event) {
           if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
           final k = event.logicalKey;
-          // ESC / Zurück -> Player verlassen (immer, auch bei Sperre – Rettungsanker am Desktop).
+          // ESC / Zurück -> Player verlassen (Rettungsanker am Desktop).
           if (k == LogicalKeyboardKey.escape || k == LogicalKeyboardKey.browserBack) { Navigator.of(context).maybePop(); return KeyEventResult.handled; }
-          if (_locked) return KeyEventResult.ignored;
           if (live && (k == LogicalKeyboardKey.arrowUp || k == LogicalKeyboardKey.channelUp)) { _zap(-1); return KeyEventResult.handled; }
           if (live && (k == LogicalKeyboardKey.arrowDown || k == LogicalKeyboardKey.channelDown)) { _zap(1); return KeyEventResult.handled; }
           if (!live && k == LogicalKeyboardKey.arrowLeft) { _seekBy(-10); return KeyEventResult.handled; }
@@ -1879,46 +1823,27 @@ class _PlayerScreenState extends State<PlayerScreen> {
               normal: controls,
               fullscreen: controls,
               // Überall UNSERE Steuerung (nicht die Desktop-Standard-Steuerung von
-              // media_kit) -> gleiche Buttons auf Windows/Handy/TV (Untertitel-Aus/An,
-              // Zappen, Sperre, Sleep, Format, Lautstärke).
-              child: Video(controller: controller, fit: _fit, controls: _locked ? NoVideoControls : MaterialVideoControls),
+              // media_kit) -> gleiche Buttons auf Windows/Handy/TV.
+              child: Video(controller: controller, fit: _fit, controls: MaterialVideoControls),
             ),
           ),
           // Immer sichtbarer Zurück-Button oben links (unabhängig von der Steuerleiste,
-          // damit man am Desktop/TV nie „festhängt"). Bei Sperre ausgeblendet.
-          if (!_locked)
-            Positioned(
-              top: ins(safe.top, 8), left: ins(safe.left, 8),
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(22),
-                  onTap: () => Navigator.of(context).maybePop(),
-                  child: Container(
-                    padding: const EdgeInsets.all(9),
-                    decoration: BoxDecoration(color: Colors.black.withValues(alpha: .45), shape: BoxShape.circle, border: Border.all(color: Colors.white24)),
-                    child: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 24),
-                  ),
-                ),
-              ),
-            ),
-          // Bei Sperre: unsichtbare Ebene schluckt ALLE Tipps; ein Tipp zeigt kurz das Entsperr-Symbol.
-          if (_locked)
-            Positioned.fill(
-              child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: _showLockHint, child: const SizedBox.expand()),
-            ),
-          if (_locked && _lockHint)
-            Positioned(
-              top: ins(safe.top, 16), left: ins(safe.left, 16),
-              child: GestureDetector(
-                onTap: _unlock,
+          // damit man am Desktop/TV nie „festhängt").
+          Positioned(
+            top: ins(safe.top, 8), left: ins(safe.left, 8),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(22),
+                onTap: () => Navigator.of(context).maybePop(),
                 child: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(color: Colors.black.withValues(alpha: .55), shape: BoxShape.circle, border: Border.all(color: Colors.white24)),
-                  child: const Icon(Icons.lock_rounded, color: Colors.white, size: 24),
+                  padding: const EdgeInsets.all(9),
+                  decoration: BoxDecoration(color: Colors.black.withValues(alpha: .45), shape: BoxShape.circle, border: Border.all(color: Colors.white24)),
+                  child: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 24),
                 ),
               ),
             ),
+          ),
         ]),
       ),
     );
