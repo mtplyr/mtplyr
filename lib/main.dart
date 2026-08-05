@@ -1786,8 +1786,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final controls = MaterialVideoControlsThemeData(
       seekOnDoubleTap: true, // Doppeltipp links/rechts = zurück/vor spulen (wie YouTube)
       // Vertikal wischen: links = Helligkeit, rechts = Lautstärke (wie IBO).
-      volumeGesture: true,
-      brightnessGesture: true,
+      volumeGesture: !kDesktop,      // Wischgesten nur am Handy (Desktop = Regler rechts)
+      brightnessGesture: !kDesktop,
       initialBrightness: _brightness,
       onBrightnessChanged: (v) { try { ScreenBrightness().setApplicationScreenBrightness(v.clamp(0.0, 1.0)); } catch (_) {} },
       onBrightnessReset: () { try { ScreenBrightness().resetApplicationScreenBrightness(); } catch (_) {} },
@@ -2084,19 +2084,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
           icon: const Icon(Icons.lock_rounded, size: 18, color: kBlue),
           label: Text(Prefs.hasPin ? L.t('change_pin') : L.t('set_pin'), style: const TextStyle(color: kBlue)),
         ),
-        const SizedBox(height: 12),
-        Row(children: [
-          Expanded(child: Text(L.t('use_bio'), style: const TextStyle(color: kText, fontSize: 14))),
-          Switch(
-            value: Prefs.useFaceId,
-            activeThumbColor: kBlue,
-            onChanged: (v) async {
-              if (v) { final ok = await _bioAuth(L.t('bio_enable')); if (!ok) return; }
-              await Prefs.setUseFaceId(v);
-              setState(() {});
-            },
-          ),
-        ]),
+        // Face ID / Biometrie nur auf Mobilgeräten – Desktop hat das nicht (dort nur PIN).
+        if (!kDesktop) ...[
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(child: Text(L.t('use_bio'), style: const TextStyle(color: kText, fontSize: 14))),
+            Switch(
+              value: Prefs.useFaceId,
+              activeThumbColor: kBlue,
+              onChanged: (v) async {
+                if (v) { final ok = await _bioAuth(L.t('bio_enable')); if (!ok) return; }
+                await Prefs.setUseFaceId(v);
+                setState(() {});
+              },
+            ),
+          ]),
+        ],
       ]));
 
   Future<bool> _bioAuth(String reason) async {
