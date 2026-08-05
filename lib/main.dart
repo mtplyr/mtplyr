@@ -1118,18 +1118,19 @@ class _LiveScreenState extends State<LiveScreen> {
     );
   }
 
-  Widget _sidebar() => ListView.builder(
-        padding: const EdgeInsets.symmetric(vertical: 8),
+  Widget _sidebar() => ListView.separated(
+        padding: const EdgeInsets.symmetric(vertical: 6),
         itemCount: cats.length,
+        separatorBuilder: (_, _) => const Divider(color: kLine, height: 1, thickness: 1, indent: 14, endIndent: 12),
         itemBuilder: (c, i) {
           final s = catSel == i;
           return TvFocus(
             onTap: () => _selectCat(i),
-            radius: 12,
+            radius: 10,
             child: Container(
-              margin: EdgeInsets.fromLTRB(14, kDesktop ? 5 : 4, 8, kDesktop ? 5 : 4),
-              padding: EdgeInsets.symmetric(horizontal: kDesktop ? 18 : 14, vertical: kDesktop ? 16 : 13),
-              decoration: BoxDecoration(color: s ? kBlue : kPanel.withValues(alpha: .35), borderRadius: BorderRadius.circular(12), border: Border.all(color: s ? kBlue : kLine)),
+              margin: EdgeInsets.symmetric(horizontal: 8, vertical: kDesktop ? 3 : 2),
+              padding: EdgeInsets.symmetric(horizontal: kDesktop ? 16 : 14, vertical: kDesktop ? 15 : 12),
+              decoration: BoxDecoration(color: s ? kBlue : Colors.transparent, borderRadius: BorderRadius.circular(10)),
               child: Text(cats[i].name, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: s ? kBg : kText, fontWeight: FontWeight.w700, fontSize: kDesktop ? 16 : 13.5)),
             ),
           );
@@ -1287,18 +1288,19 @@ class _CatalogScreenState extends State<CatalogScreen> {
     );
   }
 
-  Widget _sidebar() => ListView.builder(
-        padding: const EdgeInsets.symmetric(vertical: 8),
+  Widget _sidebar() => ListView.separated(
+        padding: const EdgeInsets.symmetric(vertical: 6),
         itemCount: cats.length,
+        separatorBuilder: (_, _) => const Divider(color: kLine, height: 1, thickness: 1, indent: 14, endIndent: 12),
         itemBuilder: (c, i) {
           final s = catSel == i;
           return TvFocus(
             onTap: () => _selectCat(i),
-            radius: 12,
+            radius: 10,
             child: Container(
-              margin: EdgeInsets.fromLTRB(14, kDesktop ? 5 : 4, 8, kDesktop ? 5 : 4),
-              padding: EdgeInsets.symmetric(horizontal: kDesktop ? 18 : 14, vertical: kDesktop ? 16 : 13),
-              decoration: BoxDecoration(color: s ? kBlue : kPanel.withValues(alpha: .35), borderRadius: BorderRadius.circular(12), border: Border.all(color: s ? kBlue : kLine)),
+              margin: EdgeInsets.symmetric(horizontal: 8, vertical: kDesktop ? 3 : 2),
+              padding: EdgeInsets.symmetric(horizontal: kDesktop ? 16 : 14, vertical: kDesktop ? 15 : 12),
+              decoration: BoxDecoration(color: s ? kBlue : Colors.transparent, borderRadius: BorderRadius.circular(10)),
               child: Text(cats[i].name, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: s ? kBg : kText, fontWeight: FontWeight.w700, fontSize: kDesktop ? 16 : 13.5)),
             ),
           );
