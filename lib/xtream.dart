@@ -124,6 +124,21 @@ class Session {
     } catch (_) { return false; }
   }
 
+  /// Manuell in der App eingegebene M3U-Link-Playlist an velaplayer.com melden.
+  /// true = auf dem Server gespeichert.
+  static Future<bool> pushM3uToServer(String url) async {
+    if (mac.isEmpty) return false;
+    try {
+      final r = await http.post(Uri.parse(kAddPlaylist), body: {
+        'mac': mac, 'key': deviceKey, 'brand': 'vela',
+        'type': 'url', 'url': url,
+      }).timeout(const Duration(seconds: 20));
+      if (r.statusCode != 200) return false;
+      final j = jsonDecode(r.body);
+      return j is Map && j['success'] == true;
+    } catch (_) { return false; }
+  }
+
   /// M3U-Playlist von einer URL laden, parsen und als aktive Quelle setzen.
   static Future<bool> loadM3u(String url, {bool persist = true}) async {
     try {

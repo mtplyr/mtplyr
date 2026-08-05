@@ -131,30 +131,34 @@ class VelaLogo extends StatelessWidget {
 }
 
 // MAC + Geräteschlüssel als Panel (Aktivierung + Playlist-Screen).
-Widget _idRowT(BuildContext context, String label, String value) => Row(children: [
+// compact = kleiner (Konto-Screen, damit die Kacheln ohne Scrollen passen).
+Widget _idRowT(BuildContext context, String label, String value, {bool compact = false}) => Row(children: [
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label, style: const TextStyle(color: kMuted, fontSize: 12)),
-        const SizedBox(height: 3),
-        Text(value, style: const TextStyle(color: kBlue, fontSize: 20, fontWeight: FontWeight.w800, letterSpacing: 1.5, fontFamily: 'monospace')),
+        Text(label, style: TextStyle(color: kMuted, fontSize: compact ? 11 : 12)),
+        SizedBox(height: compact ? 1 : 3),
+        Text(value, style: TextStyle(color: kBlue, fontSize: compact ? 15 : 20, fontWeight: FontWeight.w800, letterSpacing: compact ? 1.0 : 1.5, fontFamily: 'monospace')),
       ])),
       IconButton(
+        visualDensity: compact ? VisualDensity.compact : VisualDensity.standard,
+        padding: compact ? EdgeInsets.zero : const EdgeInsets.all(8),
+        constraints: compact ? const BoxConstraints() : null,
         onPressed: () async {
           final messenger = ScaffoldMessenger.of(context);
           await Clipboard.setData(ClipboardData(text: value));
           messenger.showSnackBar(SnackBar(backgroundColor: kPanel, content: Text(L.t('copied'), style: const TextStyle(color: kText))));
         },
-        icon: const Icon(Icons.copy_rounded, color: kMuted, size: 20),
+        icon: Icon(Icons.copy_rounded, color: kMuted, size: compact ? 18 : 20),
       ),
     ]);
 
-Widget _idPanel(BuildContext context) => Container(
+Widget _idPanel(BuildContext context, {bool compact = false}) => Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+      padding: EdgeInsets.symmetric(horizontal: compact ? 16 : 18, vertical: compact ? 9 : 14),
       decoration: BoxDecoration(color: kPanel, borderRadius: BorderRadius.circular(14), border: Border.all(color: kLine)),
       child: Column(children: [
-        _idRowT(context, L.t('mac_address'), Session.mac),
-        const Divider(color: kLine, height: 20),
-        _idRowT(context, L.t('device_key_label'), Session.deviceKey),
+        _idRowT(context, L.t('mac_address'), Session.mac, compact: compact),
+        Divider(color: kLine, height: compact ? 13 : 20),
+        _idRowT(context, L.t('device_key_label'), Session.deviceKey, compact: compact),
       ]),
     );
 
@@ -506,20 +510,33 @@ class _ConnectScreenState extends State<ConnectScreen> {
   final host = TextEditingController(text: 'http://d67.xyz:8080');
   final user = TextEditingController(text: 'alex_v_ali_3');
   final pass = TextEditingController(text: 'workfufufu');
+  final m3u = TextEditingController();
+  String mode = 'xtream'; // 'xtream' oder 'm3u'
   bool busy = false;
   String? err;
 
   Future<void> _connect() async {
     setState(() { busy = true; err = null; });
-    final a = Account(host.text.trim(), user.text.trim(), pass.text.trim());
-    final info = await Xtream.userInfo(a);
-    if (!mounted) return;
-    if (info == null) {
-      setState(() { busy = false; err = L.t('connect_err'); });
-      return;
+    bool pushed;
+    if (mode == 'm3u') {
+      final url = m3u.text.trim();
+      if (!RegExp(r'^https?://', caseSensitive: false).hasMatch(url)) {
+        setState(() { busy = false; err = L.t('m3u_url_err'); });
+        return;
+      }
+      // M3U-Link an velaplayer.com melden -> erscheint dort (Kunde/Reseller), Server = Wahrheit.
+      pushed = await Session.pushM3uToServer(url);
+    } else {
+      final a = Account(host.text.trim(), user.text.trim(), pass.text.trim());
+      final info = await Xtream.userInfo(a);
+      if (!mounted) return;
+      if (info == null) {
+        setState(() { busy = false; err = L.t('connect_err'); });
+        return;
+      }
+      // Xtream an velaplayer.com melden -> erscheint dort (Kunde/Reseller), Server = Wahrheit.
+      pushed = await Session.pushXtreamToServer(a);
     }
-    // Playlist an velaplayer.com melden -> erscheint dort (Kunde/Reseller), Server = Wahrheit.
-    final pushed = await Session.pushXtreamToServer(a);
     if (!mounted) return;
     if (!pushed) {
       setState(() { busy = false; err = L.t('server_save_err'); });
@@ -535,6 +552,32 @@ class _ConnectScreenState extends State<ConnectScreen> {
     await License.startTrial();
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const HomeGate()), (_) => false);
+  }
+
+  // Umschalter Xtream / M3U-Link.
+  Widget _modeToggle() {
+    Widget seg(String m, String label) {
+      final sel = mode == m;
+      return Expanded(
+        child: GestureDetector(
+          onTap: () => setState(() { mode = m; err = null; }),
+          child: Container(
+            height: 40,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: sel ? kBlue : Colors.transparent,
+              borderRadius: BorderRadius.circular(9),
+            ),
+            child: Text(label, style: TextStyle(color: sel ? kBg : kMuted, fontSize: 14, fontWeight: FontWeight.w700)),
+          ),
+        ),
+      );
+    }
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(color: kPanel2, borderRadius: BorderRadius.circular(11), border: Border.all(color: kLine)),
+      child: Row(children: [seg('xtream', 'Xtream'), const SizedBox(width: 4), seg('m3u', L.t('manual_m3u'))]),
+    );
   }
 
   @override
@@ -557,10 +600,15 @@ class _ConnectScreenState extends State<ConnectScreen> {
                     Text(L.t('connect_title'), style: const TextStyle(color: kText, fontSize: 20, fontWeight: FontWeight.w700, fontFamily: 'serif')),
                     const SizedBox(height: 4),
                     Text(L.t('connect_sub'), style: const TextStyle(color: kMuted, fontSize: 13)),
-                    const SizedBox(height: 8),
-                    _field(host, L.t('connect_server')),
-                    _field(user, L.t('username')),
-                    _field(pass, L.t('password'), obscure: true),
+                    const SizedBox(height: 12),
+                    _modeToggle(),
+                    if (mode == 'xtream') ...[
+                      _field(host, L.t('connect_server')),
+                      _field(user, L.t('username')),
+                      _field(pass, L.t('password'), obscure: true),
+                    ] else ...[
+                      _field(m3u, L.t('m3u_url_hint')),
+                    ],
                     if (err != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(err!, style: const TextStyle(color: Color(0xFFF2A0A0), fontSize: 13))),
                     const SizedBox(height: 18),
                     SizedBox(
@@ -2198,13 +2246,13 @@ class _AccountScreenState extends State<AccountScreen> {
           child: loading
             ? _loading()
             : Padding(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
                 child: Column(children: [
-                  _idPanel(context), // MAC + Geräteschlüssel — immer sichtbar
-                  const SizedBox(height: 12),
+                  _idPanel(context, compact: true), // MAC + Geräteschlüssel — kompakt
+                  const SizedBox(height: 10),
                   SizedBox(
                     width: double.infinity,
-                    height: 46,
+                    height: 44,
                     child: OutlinedButton.icon(
                       style: OutlinedButton.styleFrom(side: const BorderSide(color: kBlue), foregroundColor: kBlue),
                       onPressed: _reload,
@@ -2212,10 +2260,11 @@ class _AccountScreenState extends State<AccountScreen> {
                       label: Text(L.t('reload_playlist'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
                     ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
                   Expanded(
                     child: GridView.builder(
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: cols, mainAxisSpacing: 14, crossAxisSpacing: 14, mainAxisExtent: 64),
+                      physics: const NeverScrollableScrollPhysics(), // passt in 2 Reihen -> kein Scrollen
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: cols, mainAxisSpacing: 10, crossAxisSpacing: 10, mainAxisExtent: 56),
                       itemCount: data.length,
                       itemBuilder: (c, idx) {
                         final ok = data[idx][3] as bool;
