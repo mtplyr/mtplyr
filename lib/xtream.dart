@@ -22,6 +22,10 @@ const String kAddPlaylist = 'https://hub.mtplyr.com/api/playlist_add.php';
 /// echte Geraete pruefen kann (verhindert Tippfehler-„Geistergeraete").
 const String kRegister = 'https://hub.mtplyr.com/api/register_device.php';
 
+/// „Zuletzt hinzugefügt" — Server holt VOD/Serien, App bekommt nur die neuesten N
+/// (statt ~40.000 Einträge). Serverseitig gecacht -> schnelle Lobby.
+const String kHomeLatest = 'https://hub.mtplyr.com/api/home_latest.php';
+
 /// Lizenz-/Trial-Status (an die MAC gebunden, serverseitig) — Quelle der Wahrheit.
 const String kLicense = 'https://hub.mtplyr.com/api/license_status.php';
 
@@ -334,6 +338,26 @@ class Xtream {
         .map((e) => Item(e['series_id'].toString(), (e['name'] ?? '').toString(), (e['cover'] ?? '').toString(),
             added: int.tryParse('${e['last_modified'] ?? ''}') ?? 0))
         .toList();
+  }
+
+  /// „Zuletzt hinzugefügt" für die Lobby — SCHLANK über den Hub (Server sortiert
+  /// + cacht; App bekommt nur die neuesten N). {'movies': [...], 'series': [...]}.
+  static Future<Map<String, List<Item>>> homeLatest({int limit = 6}) async {
+    const empty = {'movies': <Item>[], 'series': <Item>[]};
+    if (Session.mode != 'xtream' || Session.mac.isEmpty) return empty;
+    try {
+      final uri = Uri.parse(kHomeLatest).replace(queryParameters: {
+        'mac': Session.mac, 'key': Session.deviceKey, 'brand': kBrandKey, 'limit': '$limit',
+      });
+      final r = await http.get(uri).timeout(const Duration(seconds: 30));
+      if (r.statusCode != 200) return empty;
+      final j = jsonDecode(r.body);
+      if (j is! Map) return empty;
+      List<Item> parse(dynamic list) => (list is List)
+          ? list.map((e) => Item('${e['id']}', '${e['name']}', '${e['icon'] ?? ''}', ext: '${e['ext'] ?? ''}')).toList()
+          : <Item>[];
+      return {'movies': parse(j['movies']), 'series': parse(j['series'])};
+    } catch (_) { return empty; }
   }
 
   /// Alle Live-Sender (ohne Kategorie) – für die globale Suche. Adult-Filter je nach Einstellung.

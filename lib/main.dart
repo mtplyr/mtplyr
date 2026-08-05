@@ -667,21 +667,16 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadLatest();
   }
 
-  // „Zuletzt hinzugefügt" – nach Datum sortiert (Xtream). Bei M3U gibt es keine VOD/Serien.
+  // „Zuletzt hinzugefügt" – schlank über den Hub (Server sortiert + cacht).
   Future<void> _loadLatest() async {
     if (Session.mode != 'xtream') { return; }
-    try {
-      final vod = await Xtream.allVod();
-      vod.sort((a, b) => b.added.compareTo(a.added));
-      final series = await Xtream.allSeries();
-      series.sort((a, b) => b.added.compareTo(a.added));
-      if (mounted) {
-        setState(() {
-          _latestVod = vod.take(18).toList();
-          _latestSeries = series.take(18).toList();
-        });
-      }
-    } catch (_) {}
+    final res = await Xtream.homeLatest(limit: 6);
+    if (mounted) {
+      setState(() {
+        _latestVod = res['movies'] ?? [];
+        _latestSeries = res['series'] ?? [];
+      });
+    }
   }
 
   void _open(BuildContext c, Widget s) => Navigator.of(c).push(MaterialPageRoute(builder: (_) => s)).then((_) { if (mounted) setState(() {}); });
