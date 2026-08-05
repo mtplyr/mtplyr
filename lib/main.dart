@@ -1592,6 +1592,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   BoxFit _fit = BoxFit.contain;
   bool _locked = false;
   bool _lockHint = false;
+  bool _errShown = false; // verhindert gestapelte Fehler-Dialoge
   Timer? _lockHintTimer;
   Timer? _sleepTimer;
 
@@ -1612,6 +1613,37 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (minutes > 0) {
       _sleepTimer = Timer(Duration(minutes: minutes), () { if (mounted) Navigator.of(context).maybePop(); });
     }
+  }
+
+  // Lautstärke-Regler (funktioniert auf allen Plattformen — am Desktop gibt es
+  // keine Wisch-Geste). Button in der Steuerleiste öffnet diesen Schieber.
+  void _volumeSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: kPanel,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (_) => SafeArea(
+        child: StatefulBuilder(builder: (c, setSheet) {
+          final v = player.state.volume.clamp(0.0, 100.0);
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 20),
+            child: Row(children: [
+              IconButton(
+                icon: Icon(v <= 0 ? Icons.volume_off_rounded : Icons.volume_up_rounded, color: kBlue),
+                onPressed: () { player.setVolume(v <= 0 ? 100 : 0); setSheet(() {}); },
+              ),
+              Expanded(
+                child: Slider(
+                  value: v, min: 0, max: 100, activeColor: kBlue, inactiveColor: kLine,
+                  onChanged: (nv) { player.setVolume(nv); setSheet(() {}); },
+                ),
+              ),
+              SizedBox(width: 46, child: Text('${v.round()}%', textAlign: TextAlign.end, style: const TextStyle(color: kText, fontWeight: FontWeight.w600))),
+            ]),
+          );
+        }),
+      ),
+    );
   }
 
   void _sleepMenu() {
@@ -1663,14 +1695,25 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _loadEpg();
     ScreenBrightness().application.then((v) { if (mounted) setState(() => _brightness = v); }).catchError((_) {});
     _errSub = player.stream.error.listen((e) {
-      if (mounted && e.trim().isNotEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      if (!mounted || e.trim().isEmpty || _errShown) return;
+      _errShown = true;
+      showDialog<void>(
+        context: context,
+        barrierColor: Colors.black54,
+        builder: (dctx) => AlertDialog(
           backgroundColor: kPanel,
-          content: Text(L.t('player_err'), style: const TextStyle(color: kText)),
-          duration: const Duration(seconds: 6),
-          action: SnackBarAction(label: L.t('retry'), textColor: kBlue, onPressed: _openUrl),
-        ));
-      }
+          title: Text(L.t('player_err_title'), style: const TextStyle(color: kText, fontWeight: FontWeight.w700)),
+          content: Text(L.t('player_err'), style: const TextStyle(color: kMuted)),
+          actions: [
+            TextButton(onPressed: () { Navigator.pop(dctx); Navigator.of(context).maybePop(); }, child: Text(L.t('go_back'))),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: kBlue, foregroundColor: kBg),
+              onPressed: () { Navigator.pop(dctx); _openUrl(); },
+              child: Text(L.t('retry')),
+            ),
+          ],
+        ),
+      ).then((_) { _errShown = false; });
     });
     if (widget.resume) {
       _durSub = player.stream.duration.listen((d) {
@@ -1803,6 +1846,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         if (live) MaterialCustomButton(onPressed: () => _zap(1), icon: const Icon(Icons.skip_next_rounded, color: Colors.white)),
         MaterialCustomButton(onPressed: () => _tracks(true), icon: const Icon(Icons.audiotrack_rounded, color: Colors.white)),
         MaterialCustomButton(onPressed: () => _tracks(false), icon: const Icon(Icons.closed_caption_rounded, color: Colors.white)),
+        MaterialCustomButton(onPressed: _volumeSheet, icon: const Icon(Icons.volume_up_rounded, color: Colors.white)),
         MaterialCustomButton(onPressed: _cycleFit, icon: const Icon(Icons.aspect_ratio_rounded, color: Colors.white)),
         MaterialCustomButton(onPressed: _sleepMenu, icon: Icon(_sleepTimer?.isActive == true ? Icons.bedtime_rounded : Icons.bedtime_off_rounded, color: Colors.white)),
         MaterialCustomButton(onPressed: _lock, icon: const Icon(Icons.lock_open_rounded, color: Colors.white)),
