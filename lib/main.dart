@@ -660,6 +660,8 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   List<Item> _latestVod = [];
   List<Item> _latestSeries = [];
+  final ScrollController _movieScroll = ScrollController();
+  final ScrollController _seriesScroll = ScrollController();
 
   @override
   void initState() {
@@ -667,10 +669,17 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadLatest();
   }
 
+  @override
+  void dispose() {
+    _movieScroll.dispose();
+    _seriesScroll.dispose();
+    super.dispose();
+  }
+
   // „Zuletzt hinzugefügt" – schlank über den Hub (Server sortiert + cacht).
   Future<void> _loadLatest() async {
     if (Session.mode != 'xtream') { return; }
-    final res = await Xtream.homeLatest(limit: 6);
+    final res = await Xtream.homeLatest(limit: 10);
     if (mounted) {
       setState(() {
         _latestVod = res['movies'] ?? [];
@@ -728,11 +737,11 @@ class _HomeScreenState extends State<HomeScreen> {
                           _grid(context, narrow),
                           if (_latestVod.isNotEmpty) ...[
                             SizedBox(height: narrow ? 16 : 22),
-                            _posterRow(context, L.t('latest_movies'), _latestVod, false, narrow),
+                            _posterRow(context, L.t('latest_movies'), _latestVod, false, narrow, _movieScroll),
                           ],
                           if (_latestSeries.isNotEmpty) ...[
                             SizedBox(height: narrow ? 16 : 22),
-                            _posterRow(context, L.t('latest_series'), _latestSeries, true, narrow),
+                            _posterRow(context, L.t('latest_series'), _latestSeries, true, narrow, _seriesScroll),
                           ],
                         ],
                       ),
@@ -801,10 +810,25 @@ class _HomeScreenState extends State<HomeScreen> {
     ]);
   }
 
-  // Poster-Reihe „Neueste Filme / Serien" (horizontal scrollbar).
-  Widget _posterRow(BuildContext context, String title, List<Item> items, bool isSeries, bool narrow) {
-    final h = narrow ? 152.0 : 190.0;
-    final w = narrow ? 100.0 : 128.0;
+  // Poster-Reihe „Neueste Filme / Serien" — mittig, mit dezenten Blätter-Pfeilen
+  // links/rechts. ~5–6 sichtbar, 10 geladen (Rest durch Blättern).
+  Widget _posterRow(BuildContext context, String title, List<Item> items, bool isSeries, bool narrow, ScrollController ctrl) {
+    final h = narrow ? 168.0 : 250.0;
+    final w = narrow ? 110.0 : 172.0;
+    void nudge(int dir) {
+      if (!ctrl.hasClients) return;
+      final target = (ctrl.offset + dir * (w + 14) * 3).clamp(0.0, ctrl.position.maxScrollExtent);
+      ctrl.animateTo(target, duration: const Duration(milliseconds: 320), curve: Curves.easeOut);
+    }
+    Widget arrow(IconData icon, VoidCallback onTap) => TvFocus(
+          radius: 22,
+          onTap: onTap,
+          child: Container(
+            width: 40, height: 40, margin: const EdgeInsets.symmetric(horizontal: 4),
+            decoration: BoxDecoration(color: kPanel.withValues(alpha: .55), shape: BoxShape.circle, border: Border.all(color: kLine)),
+            child: Icon(icon, color: kMuted, size: 24),
+          ),
+        );
     return Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
       Padding(
         padding: const EdgeInsets.only(left: 4, bottom: 8),
@@ -812,34 +836,41 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       SizedBox(
         height: h,
-        child: ListView.separated(
-          scrollDirection: Axis.horizontal,
-          itemCount: items.length,
-          separatorBuilder: (_, _) => const SizedBox(width: 12),
-          itemBuilder: (ctx, i) {
-            final it = items[i];
-            return TvFocus(
-              radius: 10,
-              onTap: () => _open(context, isSeries ? SeriesDetailScreen(item: it) : MovieDetailScreen(item: it)),
-              child: SizedBox(
-                width: w,
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
-                    child: SizedBox(
-                      width: w, height: h - 32,
-                      child: it.icon.isEmpty
-                          ? Container(color: kPanel2, child: Icon(isSeries ? Icons.theaters_rounded : Icons.movie_rounded, color: kMuted, size: 30))
-                          : Image.network(it.icon, fit: BoxFit.cover, errorBuilder: (_, _, _) => Container(color: kPanel2, child: Icon(isSeries ? Icons.theaters_rounded : Icons.movie_rounded, color: kMuted, size: 30))),
-                    ),
+        child: Row(children: [
+          arrow(Icons.chevron_left_rounded, () => nudge(-1)),
+          Expanded(
+            child: ListView.separated(
+              controller: ctrl,
+              scrollDirection: Axis.horizontal,
+              itemCount: items.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 14),
+              itemBuilder: (ctx, i) {
+                final it = items[i];
+                return TvFocus(
+                  radius: 12,
+                  onTap: () => _open(context, isSeries ? SeriesDetailScreen(item: it) : MovieDetailScreen(item: it)),
+                  child: SizedBox(
+                    width: w,
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: SizedBox(
+                          width: w, height: h - 34,
+                          child: it.icon.isEmpty
+                              ? Container(color: kPanel2, child: Icon(isSeries ? Icons.theaters_rounded : Icons.movie_rounded, color: kMuted, size: 34))
+                              : Image.network(it.icon, fit: BoxFit.cover, errorBuilder: (_, _, _) => Container(color: kPanel2, child: Icon(isSeries ? Icons.theaters_rounded : Icons.movie_rounded, color: kMuted, size: 34))),
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      Text(it.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kText, fontSize: 12.5, fontWeight: FontWeight.w600)),
+                    ]),
                   ),
-                  const SizedBox(height: 5),
-                  Text(it.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kText, fontSize: 12, fontWeight: FontWeight.w600)),
-                ]),
-              ),
-            );
-          },
-        ),
+                );
+              },
+            ),
+          ),
+          arrow(Icons.chevron_right_rounded, () => nudge(1)),
+        ]),
       ),
     ]);
   }
