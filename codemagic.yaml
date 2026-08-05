@@ -111,10 +111,11 @@ workflows:
       xcode: latest
       cocoapods: default
     scripts:
-      - name: Auf Nina umstellen (Name + Bundle-ID)
+      - name: Auf Nina umstellen (Name + Bundle-ID + Icon)
         script: |
           plutil -replace CFBundleDisplayName -string "Nina" ios/Runner/Info.plist
           sed -i '' 's/com\.vela\.velaplayer/com.nina.ninaplayer/g' ios/Runner.xcodeproj/project.pbxproj
+          cp ios_nina_icons/*.png ios/Runner/Assets.xcassets/AppIcon.appiconset/
       - name: Flutter-Pakete
         script: flutter pub get
       - name: Pods installieren
