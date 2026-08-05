@@ -18,6 +18,10 @@ const String kActivate = 'https://hub.mtplyr.com/api/vela_activate.php';
 /// Playlist an den Hub melden (App-seitige Eingabe erscheint dann auf velaplayer.com).
 const String kAddPlaylist = 'https://hub.mtplyr.com/api/playlist_add.php';
 
+/// Geraet beim Hub anmelden (MAC+Key) — damit die Website getippte MACs gegen
+/// echte Geraete pruefen kann (verhindert Tippfehler-„Geistergeraete").
+const String kRegister = 'https://hub.mtplyr.com/api/register_device.php';
+
 /// Lizenz-/Trial-Status (an die MAC gebunden, serverseitig) — Quelle der Wahrheit.
 const String kLicense = 'https://hub.mtplyr.com/api/license_status.php';
 
@@ -135,6 +139,18 @@ class Session {
       final j = jsonDecode(r.body);
       return j is Map && j['success'] == true;
     } catch (_) { return false; }
+  }
+
+  /// Geraet beim Hub anmelden (MAC+Key+Marke). Idempotent: legt das Geraet an bzw.
+  /// aktualisiert last_seen. So existiert die echte MAC serverseitig, bevor der
+  /// Nutzer sie auf der Website eintraegt -> die Website kann Tippfehler ablehnen.
+  static Future<void> registerDevice() async {
+    if (mac.isEmpty) return;
+    try {
+      await http.post(Uri.parse(kRegister), body: {
+        'mac': mac, 'key': deviceKey, 'brand': kBrandKey,
+      }).timeout(const Duration(seconds: 12));
+    } catch (_) {}
   }
 
   /// M3U-Playlist von einer URL laden, parsen und als aktive Quelle setzen.

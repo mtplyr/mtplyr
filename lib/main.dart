@@ -20,6 +20,7 @@ void main() async {
   await ResumeStore.load();
   await ContinueStore.load();
   await License.load();
+  unawaited(Session.registerDevice()); // MAC beim Hub anmelden (nicht blockierend)
   runApp(const BrandApp());
 }
 
