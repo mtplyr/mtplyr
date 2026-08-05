@@ -10,6 +10,7 @@ import 'package:window_manager/window_manager.dart';
 import 'xtream.dart';
 import 'l10n.dart';
 import 'brand.dart';
+import 'downloads.dart';
 
 /// Desktop (Windows/macOS/Linux) — dort gibt es Fenster-Vollbild.
 final bool kDesktop = !kIsWeb &&
@@ -28,6 +29,7 @@ void main() async {
   await ResumeStore.load();
   await ContinueStore.load();
   await License.load();
+  if (kDesktop) { await Downloads.load(); } // Offline-Downloads (Desktop)
   unawaited(Session.registerDevice()); // MAC beim Hub anmelden (nicht blockierend)
   runApp(const BrandApp());
 }
@@ -681,6 +683,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 const Spacer(),
                 _iconBox(Icons.search_rounded, onTap: () => _open(context, const SearchScreen())),
                 const SizedBox(width: 10),
+                if (kDesktop) ...[
+                  _iconBox(Icons.download_rounded, onTap: () => _open(context, const DownloadsScreen())),
+                  const SizedBox(width: 10),
+                ],
                 _iconBox(Icons.settings_rounded, onTap: () => _open(context, const SettingsScreen())),
                 const SizedBox(width: 10),
                 _iconBox(Icons.person_rounded, onTap: () => _open(context, const AccountScreen())),
@@ -839,6 +845,92 @@ PreferredSizeWidget _subBar(BuildContext c, String title, {List<Widget>? actions
 
 Widget _loading() => const Center(child: CircularProgressIndicator(color: kBlue));
 Widget _empty(String t) => Center(child: Text(t, style: const TextStyle(color: kMuted)));
+
+// ============================ DOWNLOADS (offline, nur Desktop) ============================
+// Download-Steuerung als Button (voll) oder Icon (compact). Reflektiert live den Status.
+Widget dlControl(BuildContext context, {required String key, required String title, required String url, required String ext, String poster = '', bool compact = false}) {
+  if (!kDesktop) return const SizedBox.shrink();
+  return ValueListenableBuilder<int>(
+    valueListenable: Downloads.notifier,
+    builder: (c, _, _) {
+      final d = Downloads.get(key);
+      final st = d?.status;
+      IconData icon; Color color = kBlue; VoidCallback? onTap; String label;
+      if (st == 'done') { icon = Icons.download_done_rounded; color = kOk; onTap = null; label = L.t('dl_offline'); }
+      else if (st == 'downloading') { icon = Icons.downloading_rounded; onTap = () => Downloads.remove(key); label = '${(d!.progress * 100).round()}%'; }
+      else if (st == 'queued') { icon = Icons.schedule_rounded; onTap = () => Downloads.remove(key); label = '…'; }
+      else if (st == 'error') { icon = Icons.error_outline_rounded; color = const Color(0xFFF2A0A0); onTap = () => Downloads.add(key: key, title: title, url: url, ext: ext, poster: poster); label = L.t('retry'); }
+      else { icon = Icons.download_rounded; onTap = () => Downloads.add(key: key, title: title, url: url, ext: ext, poster: poster); label = L.t('download'); }
+      if (compact) return IconButton(tooltip: label, icon: Icon(icon, color: color, size: 22), onPressed: onTap);
+      return SizedBox(
+        height: 52,
+        child: OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(side: BorderSide(color: color), foregroundColor: color, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+          onPressed: onTap,
+          icon: Icon(icon, size: 20),
+          label: Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
+        ),
+      );
+    },
+  );
+}
+
+class DownloadsScreen extends StatelessWidget {
+  const DownloadsScreen({super.key});
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: _subBar(context, L.t('downloads')),
+      body: Container(
+        decoration: _bgDeco(),
+        child: SafeArea(
+          child: ValueListenableBuilder<int>(
+            valueListenable: Downloads.notifier,
+            builder: (c, _, _) {
+              final items = Downloads.all();
+              if (items.isEmpty) return _empty(L.t('dl_none'));
+              return ListView.builder(
+                padding: const EdgeInsets.all(16),
+                itemCount: items.length,
+                itemBuilder: (c, i) {
+                  final d = items[i];
+                  final done = d.status == 'done';
+                  return Container(
+                    margin: const EdgeInsets.symmetric(vertical: 5),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    decoration: BoxDecoration(color: kPanel.withValues(alpha: .6), borderRadius: BorderRadius.circular(12), border: Border.all(color: kLine)),
+                    child: Row(children: [
+                      Icon(done ? Icons.play_circle_fill_rounded : Icons.downloading_rounded, color: done ? kBlue : kMuted, size: 30),
+                      const SizedBox(width: 14),
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(d.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kText, fontSize: 15, fontWeight: FontWeight.w600)),
+                        const SizedBox(height: 6),
+                        if (done)
+                          Text(L.t('dl_offline'), style: const TextStyle(color: kOk, fontSize: 12.5, fontWeight: FontWeight.w600))
+                        else if (d.status == 'error')
+                          Text(L.t('player_err'), style: const TextStyle(color: Color(0xFFF2A0A0), fontSize: 12.5))
+                        else
+                          ClipRRect(borderRadius: BorderRadius.circular(3), child: LinearProgressIndicator(value: d.total > 0 ? d.progress : null, minHeight: 5, backgroundColor: kLine, valueColor: const AlwaysStoppedAnimation(kBlue))),
+                      ])),
+                      const SizedBox(width: 12),
+                      if (done)
+                        FilledButton(
+                          style: FilledButton.styleFrom(backgroundColor: kBlue, foregroundColor: kBg),
+                          onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(title: d.title, url: d.path, resume: true, poster: d.poster))),
+                          child: Text(L.t('play')),
+                        ),
+                      IconButton(onPressed: () => Downloads.remove(d.key), icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFF2A0A0))),
+                    ]),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 // ============================ LIVE ============================
 class LiveScreen extends StatefulWidget {
@@ -1382,15 +1474,29 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                       const SizedBox(height: 16),
                       Expanded(child: SingleChildScrollView(child: Text(plot.isEmpty ? L.t('no_desc') : plot, style: const TextStyle(color: kMuted, fontSize: 14, height: 1.5)))),
                       const SizedBox(height: 16),
-                      SizedBox(
-                        width: 220, height: 52,
-                        child: FilledButton.icon(
-                          autofocus: kTvRing,
-                          style: FilledButton.styleFrom(backgroundColor: kBlue, foregroundColor: kBg, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                          onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(title: widget.item.name, url: Xtream.vodUrl(widget.item.id, ext), resume: true, poster: cover))),
-                          icon: const Icon(Icons.play_arrow_rounded),
-                          label: Text(L.t('play'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-                        ),
+                      ValueListenableBuilder<int>(
+                        valueListenable: Downloads.notifier,
+                        builder: (c, _, _) {
+                          final key = 'vod_${widget.item.id}';
+                          final url = Xtream.vodUrl(widget.item.id, ext);
+                          final local = Downloads.localPath(key); // offline, wenn vorhanden
+                          return Row(children: [
+                            SizedBox(
+                              width: 200, height: 52,
+                              child: FilledButton.icon(
+                                autofocus: kTvRing,
+                                style: FilledButton.styleFrom(backgroundColor: kBlue, foregroundColor: kBg, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                                onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(title: widget.item.name, url: local ?? url, resume: true, poster: cover))),
+                                icon: const Icon(Icons.play_arrow_rounded),
+                                label: Text(L.t('play'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                              ),
+                            ),
+                            if (kDesktop) ...[
+                              const SizedBox(width: 12),
+                              dlControl(context, key: key, title: widget.item.name, url: url, ext: ext, poster: cover),
+                            ],
+                          ]);
+                        },
                       ),
                     ]),
                   ),
@@ -1487,30 +1593,55 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
                           ),
                         ),
                       const SizedBox(height: 10),
+                      if (kDesktop && eps.isNotEmpty) ...[
+                        SizedBox(
+                          height: 44,
+                          child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(side: const BorderSide(color: kBlue), foregroundColor: kBlue),
+                            onPressed: () {
+                              for (final list in det!.seasons.values) {
+                                for (final e in list) {
+                                  Downloads.add(key: 'ep_${e.id}', title: '${widget.item.name} – ${e.title}', url: Xtream.seriesEpUrl(e.id, e.ext), ext: e.ext, poster: cover);
+                                }
+                              }
+                            },
+                            icon: const Icon(Icons.download_rounded, size: 20),
+                            label: Text(L.t('download_all'), style: const TextStyle(fontWeight: FontWeight.w700)),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                      ],
                       Expanded(
                         child: eps.isEmpty
                             ? _empty(L.t('no_eps'))
-                            : ListView.builder(
-                                itemCount: eps.length,
-                                itemBuilder: (c, i) {
-                                  final e = eps[i];
-                                  return TvFocus(
-                                    radius: 10,
-                                    autofocus: i == 0,
-                                    onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(title: e.title, url: Xtream.seriesEpUrl(e.id, e.ext), resume: true, poster: cover))),
-                                    child: Container(
-                                      margin: const EdgeInsets.symmetric(vertical: 4),
-                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                                      decoration: BoxDecoration(color: kPanel, borderRadius: BorderRadius.circular(10), border: Border.all(color: kLine)),
-                                      child: Row(children: [
-                                        Container(width: 30, height: 30, alignment: Alignment.center, decoration: BoxDecoration(color: kPanel2, borderRadius: BorderRadius.circular(8)), child: Text('${e.num}', style: const TextStyle(color: kBlue, fontWeight: FontWeight.w700, fontSize: 12))),
-                                        const SizedBox(width: 12),
-                                        Expanded(child: Text(e.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kText, fontSize: 14, fontWeight: FontWeight.w600))),
-                                        const Icon(Icons.play_circle_outline_rounded, color: kMuted, size: 20),
-                                      ]),
-                                    ),
-                                  );
-                                },
+                            : ValueListenableBuilder<int>(
+                                valueListenable: Downloads.notifier,
+                                builder: (c, _, _) => ListView.builder(
+                                  itemCount: eps.length,
+                                  itemBuilder: (c, i) {
+                                    final e = eps[i];
+                                    final key = 'ep_${e.id}';
+                                    final url = Xtream.seriesEpUrl(e.id, e.ext);
+                                    final local = Downloads.localPath(key);
+                                    return TvFocus(
+                                      radius: 10,
+                                      autofocus: i == 0,
+                                      onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(title: e.title, url: local ?? url, resume: true, poster: cover))),
+                                      child: Container(
+                                        margin: const EdgeInsets.symmetric(vertical: 4),
+                                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                        decoration: BoxDecoration(color: kPanel, borderRadius: BorderRadius.circular(10), border: Border.all(color: kLine)),
+                                        child: Row(children: [
+                                          Container(width: 30, height: 30, alignment: Alignment.center, decoration: BoxDecoration(color: kPanel2, borderRadius: BorderRadius.circular(8)), child: Text('${e.num}', style: const TextStyle(color: kBlue, fontWeight: FontWeight.w700, fontSize: 12))),
+                                          const SizedBox(width: 12),
+                                          Expanded(child: Text(e.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kText, fontSize: 14, fontWeight: FontWeight.w600))),
+                                          if (kDesktop) dlControl(context, key: key, title: '${widget.item.name} – ${e.title}', url: url, ext: e.ext, poster: cover, compact: true)
+                                          else const Icon(Icons.play_circle_outline_rounded, color: kMuted, size: 20),
+                                        ]),
+                                      ),
+                                    );
+                                  },
+                                ),
                               ),
                       ),
                     ]),
