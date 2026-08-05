@@ -1,18 +1,26 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:screen_brightness/screen_brightness.dart';
+import 'package:window_manager/window_manager.dart';
 import 'xtream.dart';
 import 'l10n.dart';
 import 'brand.dart';
 
+/// Desktop (Windows/macOS/Linux) — dort gibt es Fenster-Vollbild.
+final bool kDesktop = !kIsWeb &&
+    (defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.linux ||
+        defaultTargetPlatform == TargetPlatform.macOS);
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
+  if (kDesktop) { try { await windowManager.ensureInitialized(); } catch (_) {} }
   SystemChrome.setPreferredOrientations(const [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
   await Session.load();
   await FavStore.load();
@@ -1616,13 +1624,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
   double _brightness = 0.5;
   BoxFit _fit = BoxFit.contain;
   bool _errShown = false; // verhindert gestapelte Fehler-Dialoge
-  double _vol = 100; // Lautstärke 0..100 (Inline-Regler in der Leiste)
+  double _vol = 100; // Lautstärke 0..100 (Regler rechts)
+  bool _fs = false;  // Fenster-Vollbild (Desktop)
+  String _clock = '';
+  Timer? _clockTimer;
+
+  static String _fmtClock() { final n = DateTime.now(); return '${n.hour.toString().padLeft(2, '0')}:${n.minute.toString().padLeft(2, '0')}'; }
 
   void _cycleFit() => setState(() {
         _fit = _fit == BoxFit.contain ? BoxFit.cover : (_fit == BoxFit.cover ? BoxFit.fill : BoxFit.contain);
       });
 
   void _setVol(double v) { _vol = v.clamp(0, 100); player.setVolume(_vol); setState(() {}); }
+
+  Future<void> _toggleFs() async {
+    _fs = !_fs;
+    try { await windowManager.setFullScreen(_fs); } catch (_) {}
+    if (mounted) setState(() {});
+  }
 
   Future<void> _applySubScale() async {
     try { await (player.platform as dynamic).setProperty('sub-scale', Prefs.subScale.toStringAsFixed(2)); } catch (_) {}
@@ -1637,6 +1656,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void initState() {
     super.initState();
     _openUrl();
+    _clock = _fmtClock();
+    _clockTimer = Timer.periodic(const Duration(seconds: 20), (_) { if (mounted) setState(() => _clock = _fmtClock()); });
     _applySubScale();
     _loadEpg();
     ScreenBrightness().application.then((v) { if (mounted) setState(() => _brightness = v); }).catchError((_) {});
@@ -1690,6 +1711,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
     _durSub?.cancel();
     _errSub?.cancel();
+    _clockTimer?.cancel();
+    if (_fs) { try { windowManager.setFullScreen(false); } catch (_) {} }
     try { ScreenBrightness().resetApplicationScreenBrightness(); } catch (_) {}
     player.dispose();
     super.dispose();
@@ -1755,6 +1778,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final live = widget.channels != null;
     final safe = MediaQuery.of(context).padding;
     double ins(double v, double min) => v < min ? min : v;
+    // Desktop = Maus -> alles größer/dicker als am Handy.
+    final double bs = kDesktop ? 30 : 24;       // Buttons untere Leiste
+    final double bigSec = kDesktop ? 44 : 34;   // seitliche Transport-Tasten
+    final double bigPlay = kDesktop ? 64 : 52;  // zentrale Play/Pause-Taste
     // Bedienelemente von den (abgerundeten) Rändern wegrücken + oben auto-ausblenden.
     final controls = MaterialVideoControlsThemeData(
       seekOnDoubleTap: true, // Doppeltipp links/rechts = zurück/vor spulen (wie YouTube)
@@ -1776,24 +1803,56 @@ class _PlayerScreenState extends State<PlayerScreen> {
         left: ins(safe.left, 16), right: ins(safe.right, 16),
         top: ins(safe.top, 8), bottom: ins(safe.bottom, 10),
       ),
-      seekBarMargin: EdgeInsets.only(bottom: 42, left: ins(safe.left, 16), right: ins(safe.right, 16)),
-      bottomButtonBarMargin: EdgeInsets.only(bottom: 42, left: ins(safe.left, 16), right: ins(safe.right, 16)),
-      topButtonBarMargin: const EdgeInsets.only(top: 4, left: 4, right: 4),
-      // Kein Vollbild-Button (App ist immer Vollbild) – nur die Restzeit-Anzeige.
-      bottomButtonBar: const [MaterialPositionIndicator()],
+      // Ladebalken: dick, gut sichtbar; klarer Abstand zur unteren Leiste, damit die
+      // Buttons NICHT auf dem Balken sitzen.
+      seekBarHeight: 6,
+      seekBarThumbSize: 16,
+      seekBarContainerHeight: 44,
+      seekBarColor: Colors.white24,
+      seekBarPositionColor: kBlue,
+      seekBarThumbColor: kBlue,
+      seekBarMargin: EdgeInsets.only(bottom: kDesktop ? 74 : 56, left: ins(safe.left, 20), right: ins(safe.right, 20)),
+      bottomButtonBarMargin: EdgeInsets.only(bottom: kDesktop ? 22 : 12, left: ins(safe.left, 20), right: ins(safe.right, 20)),
+      topButtonBarMargin: EdgeInsets.only(top: ins(safe.top, 8), left: 4, right: ins(safe.right, 10)),
+      // Große zentrierte Transport-Tasten (Maus-freundlich, wie IBO).
+      primaryButtonBar: live
+          ? [
+              const Spacer(flex: 2),
+              MaterialCustomButton(onPressed: () => _zap(-1), iconSize: bigSec, icon: const Icon(Icons.skip_previous_rounded, color: Colors.white)),
+              const Spacer(),
+              MaterialPlayOrPauseButton(iconSize: bigPlay),
+              const Spacer(),
+              MaterialCustomButton(onPressed: () => _zap(1), iconSize: bigSec, icon: const Icon(Icons.skip_next_rounded, color: Colors.white)),
+              const Spacer(flex: 2),
+            ]
+          : [
+              const Spacer(flex: 2),
+              MaterialCustomButton(onPressed: () => _seekBy(-10), iconSize: bigSec, icon: const Icon(Icons.replay_10_rounded, color: Colors.white)),
+              const Spacer(),
+              MaterialPlayOrPauseButton(iconSize: bigPlay),
+              const Spacer(),
+              MaterialCustomButton(onPressed: () => _seekBy(10), iconSize: bigSec, icon: const Icon(Icons.forward_10_rounded, color: Colors.white)),
+              const Spacer(flex: 2),
+            ],
+      // Untere Leiste: große Restzeit-Anzeige links; Audio/Untertitel/Format/Vollbild rechts.
+      bottomButtonBar: [
+        MaterialPositionIndicator(style: TextStyle(color: Colors.white, fontSize: kDesktop ? 16 : 13, fontWeight: FontWeight.w700)),
+        const Spacer(),
+        MaterialCustomButton(onPressed: () => _tracks(true), iconSize: bs, icon: const Icon(Icons.audiotrack_rounded, color: Colors.white)),
+        MaterialCustomButton(onPressed: () => _tracks(false), iconSize: bs, icon: const Icon(Icons.closed_caption_rounded, color: Colors.white)),
+        MaterialCustomButton(onPressed: _cycleFit, iconSize: bs, icon: const Icon(Icons.aspect_ratio_rounded, color: Colors.white)),
+        if (kDesktop) MaterialCustomButton(onPressed: _toggleFs, iconSize: bs, icon: Icon(_fs ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded, color: Colors.white)),
+      ],
+      // Oben: Titel mittig + Uhr rechts (Zurück-Pfeil ist Overlay links).
       topButtonBar: [
-        const SizedBox(width: 52), // Platz für den immer sichtbaren Zurück-Button (Overlay)
+        const SizedBox(width: 52),
         Expanded(
-          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontFamily: 'serif', fontSize: 18)),
-            if (epg.isNotEmpty) Text('${L.t('now')}: $epg', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kBlue, fontSize: 11.5, fontWeight: FontWeight.w500)),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.center, children: [
+            Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontFamily: 'serif', fontSize: kDesktop ? 20 : 17)),
+            if (epg.isNotEmpty) Text('${L.t('now')}: $epg', maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center, style: const TextStyle(color: kBlue, fontSize: 12, fontWeight: FontWeight.w500)),
           ]),
         ),
-        if (live) MaterialCustomButton(onPressed: () => _zap(-1), icon: const Icon(Icons.skip_previous_rounded, color: Colors.white)),
-        if (live) MaterialCustomButton(onPressed: () => _zap(1), icon: const Icon(Icons.skip_next_rounded, color: Colors.white)),
-        MaterialCustomButton(onPressed: () => _tracks(true), icon: const Icon(Icons.audiotrack_rounded, color: Colors.white)),
-        MaterialCustomButton(onPressed: () => _tracks(false), icon: const Icon(Icons.closed_caption_rounded, color: Colors.white)),
-        MaterialCustomButton(onPressed: _cycleFit, icon: const Icon(Icons.aspect_ratio_rounded, color: Colors.white)),
+        SizedBox(width: 64, child: Text(_clock, textAlign: TextAlign.right, style: TextStyle(color: Colors.white, fontSize: kDesktop ? 15 : 13, fontWeight: FontWeight.w600))),
       ],
     );
     return Scaffold(
