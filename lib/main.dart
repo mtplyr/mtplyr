@@ -1650,10 +1650,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
     try { await (player.platform as dynamic).setProperty('sub-scale', Prefs.subScale.toStringAsFixed(2)); } catch (_) {}
   }
 
+  // Manche Anbieter/CDNs (v. a. VOD) lehnen den Standard-Player-User-Agent ab.
+  // Ein gängiger IPTV-UA wird überall akzeptiert.
+  static const Map<String, String> _kHdr = {'User-Agent': 'IBOPlayer'};
+  void _openUrl() => player.open(Media(_url, httpHeaders: _kHdr));
+
   @override
   void initState() {
     super.initState();
-    player.open(Media(_url));
+    _openUrl();
     _applySubScale();
     _loadEpg();
     ScreenBrightness().application.then((v) { if (mounted) setState(() => _brightness = v); }).catchError((_) {});
@@ -1663,7 +1668,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           backgroundColor: kPanel,
           content: Text(L.t('player_err'), style: const TextStyle(color: kText)),
           duration: const Duration(seconds: 6),
-          action: SnackBarAction(label: L.t('retry'), textColor: kBlue, onPressed: () => player.open(Media(_url))),
+          action: SnackBarAction(label: L.t('retry'), textColor: kBlue, onPressed: _openUrl),
         ));
       }
     });
@@ -1715,7 +1720,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (n < 0 || n >= ch.length) return;
     _url = widget.urlFor!(ch[n]);
     setState(() { idx = n; title = ch[n].name; });
-    player.open(Media(_url));
+    _openUrl();
     _loadEpg();
   }
 
@@ -1787,8 +1792,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       // Kein Vollbild-Button (App ist immer Vollbild) – nur die Restzeit-Anzeige.
       bottomButtonBar: const [MaterialPositionIndicator()],
       topButtonBar: [
-        MaterialCustomButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 22)),
-        const SizedBox(width: 6),
+        const SizedBox(width: 52), // Platz für den immer sichtbaren Zurück-Button (Overlay)
         Expanded(
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontFamily: 'serif', fontSize: 18)),
@@ -1810,8 +1814,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
         autofocus: true,
         onKeyEvent: (node, event) {
           if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
-          if (_locked) return KeyEventResult.ignored;
           final k = event.logicalKey;
+          // ESC / Zurück -> Player verlassen (immer, auch bei Sperre – Rettungsanker am Desktop).
+          if (k == LogicalKeyboardKey.escape || k == LogicalKeyboardKey.browserBack) { Navigator.of(context).maybePop(); return KeyEventResult.handled; }
+          if (_locked) return KeyEventResult.ignored;
           if (live && (k == LogicalKeyboardKey.arrowUp || k == LogicalKeyboardKey.channelUp)) { _zap(-1); return KeyEventResult.handled; }
           if (live && (k == LogicalKeyboardKey.arrowDown || k == LogicalKeyboardKey.channelDown)) { _zap(1); return KeyEventResult.handled; }
           if (!live && k == LogicalKeyboardKey.arrowLeft) { _seekBy(-10); return KeyEventResult.handled; }
@@ -1828,6 +1834,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
               child: Video(controller: controller, fit: _fit, controls: _locked ? NoVideoControls : AdaptiveVideoControls),
             ),
           ),
+          // Immer sichtbarer Zurück-Button oben links (unabhängig von der Steuerleiste,
+          // damit man am Desktop/TV nie „festhängt"). Bei Sperre ausgeblendet.
+          if (!_locked)
+            Positioned(
+              top: ins(safe.top, 8), left: ins(safe.left, 8),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(22),
+                  onTap: () => Navigator.of(context).maybePop(),
+                  child: Container(
+                    padding: const EdgeInsets.all(9),
+                    decoration: BoxDecoration(color: Colors.black.withValues(alpha: .45), shape: BoxShape.circle, border: Border.all(color: Colors.white24)),
+                    child: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 24),
+                  ),
+                ),
+              ),
+            ),
           // Bei Sperre: unsichtbare Ebene schluckt ALLE Tipps; ein Tipp zeigt kurz das Entsperr-Symbol.
           if (_locked)
             Positioned.fill(

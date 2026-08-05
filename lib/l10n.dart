@@ -86,7 +86,7 @@ class L {
     'catchup_none': ['Keine aufgezeichneten Sendungen für diesen Sender', 'No recorded programs for this channel', 'Bu kanal için kayıt yok', 'لا برامج مسجلة لهذه القناة', 'Aucune émission enregistrée pour cette chaîne', 'Nessun programma registrato per questo canale', 'Δεν υπάρχουν εγγραφές για αυτό το κανάλι'],
     'minutes_short': ['Min', 'min', 'dk', 'دقيقة', 'min', 'min', 'λεπτά'],
     // Player
-    'player_err': ['Wiedergabe nicht möglich – Sendung evtl. noch nicht im Archiv verfügbar.', 'Playback failed – program may not be archived yet.', 'Oynatılamıyor – yayın henüz arşivde olmayabilir.', 'تعذّر التشغيل – قد لا يكون البرنامج مؤرشفًا بعد.', 'Lecture impossible – l\'émission n\'est peut-être pas encore archivée.', 'Riproduzione non riuscita – il programma potrebbe non essere ancora in archivio.', 'Αδύνατη η αναπαραγωγή – ίσως δεν έχει αρχειοθετηθεί ακόμη.'],
+    'player_err': ['Wiedergabe nicht möglich. Bitte erneut versuchen.', 'Playback failed. Please try again.', 'Oynatılamıyor. Lütfen tekrar deneyin.', 'تعذّر التشغيل. حاول مرة أخرى.', 'Lecture impossible. Veuillez réessayer.', 'Riproduzione non riuscita. Riprova.', 'Αδύνατη η αναπαραγωγή. Δοκιμάστε ξανά.'],
     'now': ['Jetzt', 'Now', 'Şimdi', 'الآن', 'En ce moment', 'Ora', 'Τώρα'],
     'pick_audio': ['Audiospur wählen', 'Select audio track', 'Ses parçası seç', 'اختر المسار الصوتي', 'Choisir la piste audio', 'Seleziona traccia audio', 'Επιλογή ήχου'],
     'pick_subs': ['Untertitel wählen', 'Select subtitles', 'Altyazı seç', 'اختر الترجمة', 'Choisir les sous-titres', 'Seleziona sottotitoli', 'Επιλογή υποτίτλων'],
