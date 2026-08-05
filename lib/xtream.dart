@@ -4,6 +4,7 @@ import 'dart:ui' show PlatformDispatcher;
 import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'brand.dart';
 
 /// Proxy auf dem Hub (umgeht CORS, holt Provider-Daten server-zu-server).
 const String kProxy = 'https://hub.mtplyr.com/api/xt.php';
@@ -19,9 +20,6 @@ const String kAddPlaylist = 'https://hub.mtplyr.com/api/playlist_add.php';
 
 /// Lizenz-/Trial-Status (an die MAC gebunden, serverseitig) — Quelle der Wahrheit.
 const String kLicense = 'https://hub.mtplyr.com/api/license_status.php';
-
-/// Portal, auf dem Nutzer ihre Playlist (M3U/Xtream) mit dem Code hochladen.
-const String kPortal = 'velaplayer.com';
 
 class Account {
   final String host, user, pass;
@@ -84,7 +82,7 @@ class Session {
   static Future<String> syncFromActivation() async {
     if (mac.isEmpty) return 'error';
     try {
-      final uri = Uri.parse(kActivate).replace(queryParameters: {'mac': mac, 'key': deviceKey});
+      final uri = Uri.parse(kActivate).replace(queryParameters: {'mac': mac, 'key': deviceKey, 'brand': kBrandKey});
       final r = await http.get(uri).timeout(const Duration(seconds: 15));
       if (r.statusCode != 200) return 'error';
       final j = jsonDecode(r.body);
@@ -115,7 +113,7 @@ class Session {
     if (mac.isEmpty) return false;
     try {
       final r = await http.post(Uri.parse(kAddPlaylist), body: {
-        'mac': mac, 'key': deviceKey, 'brand': 'vela',
+        'mac': mac, 'key': deviceKey, 'brand': kBrandKey,
         'type': 'xtream', 'xt_server': a.host, 'xt_user': a.user, 'xt_pass': a.pass,
       }).timeout(const Duration(seconds: 20));
       if (r.statusCode != 200) return false;
@@ -130,7 +128,7 @@ class Session {
     if (mac.isEmpty) return false;
     try {
       final r = await http.post(Uri.parse(kAddPlaylist), body: {
-        'mac': mac, 'key': deviceKey, 'brand': 'vela',
+        'mac': mac, 'key': deviceKey, 'brand': kBrandKey,
         'type': 'url', 'url': url,
       }).timeout(const Duration(seconds: 20));
       if (r.statusCode != 200) return false;
@@ -550,7 +548,7 @@ class License {
     if (Session.mac.isEmpty) return;
     try {
       final uri = Uri.parse(kLicense).replace(
-          queryParameters: {'mac': Session.mac, 'key': Session.deviceKey, 'brand': 'vela'});
+          queryParameters: {'mac': Session.mac, 'key': Session.deviceKey, 'brand': kBrandKey});
       final r = await http.get(uri).timeout(const Duration(seconds: 12));
       if (r.statusCode != 200) return;
       final j = jsonDecode(r.body);

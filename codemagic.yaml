@@ -95,3 +95,41 @@ workflows:
         notify:
           success: true
           failure: true
+
+  # ------------------------------------------------------------------
+  # NINA (unsigniert) — dieselbe Codebasis, per BRAND=nina umgeskinnt
+  # (Grün, Nina-Logo/Name, 2x2-Home). Eigene Bundle-ID + Anzeigename,
+  # damit Nina NEBEN Vela aufs iPhone passt. Läuft NUR manuell (kein
+  # Push-Trigger) — in Codemagic "Start new build" -> diesen Workflow.
+  # ------------------------------------------------------------------
+  ios-nina-unsigned:
+    name: Nina iOS (unsigniert, fuer Sideloadly)
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Auf Nina umstellen (Name + Bundle-ID)
+        script: |
+          plutil -replace CFBundleDisplayName -string "Nina" ios/Runner/Info.plist
+          sed -i '' 's/com\.vela\.velaplayer/com.nina.ninaplayer/g' ios/Runner.xcodeproj/project.pbxproj
+      - name: Flutter-Pakete
+        script: flutter pub get
+      - name: Pods installieren
+        script: find . -name "Podfile" -execdir pod install \;
+      - name: Unsigniert bauen (BRAND=nina)
+        script: flutter build ios --release --no-codesign --dart-define=BRAND=nina
+      - name: Als .ipa verpacken
+        script: |
+          cd build/ios/iphoneos
+          mkdir -p Payload
+          cp -r Runner.app Payload/
+          zip -r nina-unsigned.ipa Payload
+    artifacts:
+      - build/ios/iphoneos/nina-unsigned.ipa
+    publishing:
+      email:
+        recipients:
+          - okan_2oo8@hotmail.de

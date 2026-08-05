@@ -8,6 +8,7 @@ import 'package:local_auth/local_auth.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import 'xtream.dart';
 import 'l10n.dart';
+import 'brand.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -19,29 +20,20 @@ void main() async {
   await ResumeStore.load();
   await ContinueStore.load();
   await License.load();
-  runApp(const VelaApp());
+  runApp(const BrandApp());
 }
 
-const kBg = Color(0xFF0C1524);
-const kBg2 = Color(0xFF17283F);
-const kPanel = Color(0xFF152134);
-const kPanel2 = Color(0xFF1D2B42);
-const kLine = Color(0xFF2B3E59);
-const kBlue = Color(0xFF6FB1F2);
-const kBlue2 = Color(0xFF4685C4);
-const kText = Color(0xFFEAF1FB);
-const kMuted = Color(0xFF93A4BE);
-const kOk = Color(0xFF3FDA7C);
+// Farben + Markenname kommen aus brand.dart (Vela = Blau, Nina = Grün).
 
-class VelaApp extends StatelessWidget {
-  const VelaApp({super.key});
+class BrandApp extends StatelessWidget {
+  const BrandApp({super.key});
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<int>(
       valueListenable: langTick,
       builder: (_, _, _) => MaterialApp(
         key: ValueKey(Prefs.lang),
-        title: 'Vela',
+        title: kBrandName,
         debugShowCheckedModeBanner: false,
         theme: ThemeData(useMaterial3: true, brightness: Brightness.dark, scaffoldBackgroundColor: kBg, fontFamily: 'Roboto'),
         home: !Session.isReady ? const ActivationScreen() : const HomeGate(),
@@ -107,22 +99,23 @@ String _tsDate(dynamic v) {
   return '${two(d.day)}.${two(d.month)}.${d.year}';
 }
 
-class VelaLogo extends StatelessWidget {
+class BrandLogo extends StatelessWidget {
   final double size;
-  const VelaLogo({super.key, this.size = 34});
+  const BrandLogo({super.key, this.size = 34});
   @override
   Widget build(BuildContext context) {
+    // Nina: Kreis + Stream-Icon (grün); Vela: Rundeck + Play-Pfeil (blau).
     return Row(mainAxisSize: MainAxisSize.min, children: [
       Container(
         width: size, height: size,
-        decoration: BoxDecoration(gradient: const LinearGradient(colors: [kBlue, kBlue2]), borderRadius: BorderRadius.circular(size * 0.28)),
-        child: Icon(Icons.play_arrow_rounded, color: kBg, size: size * 0.66),
+        decoration: BoxDecoration(gradient: const LinearGradient(colors: [kBlue, kBlue2]), borderRadius: BorderRadius.circular(size * (kIsNina ? 0.5 : 0.28))),
+        child: Icon(kIsNina ? Icons.sensors_rounded : Icons.play_arrow_rounded, color: kBg, size: size * (kIsNina ? 0.6 : 0.66)),
       ),
       const SizedBox(width: 9),
       Text.rich(
         const TextSpan(children: [
-          TextSpan(text: 'VE', style: TextStyle(color: kText, fontWeight: FontWeight.w800, letterSpacing: 1.5)),
-          TextSpan(text: 'LA', style: TextStyle(color: kBlue, fontWeight: FontWeight.w800, letterSpacing: 1.5)),
+          TextSpan(text: kIsNina ? 'NI' : 'VE', style: TextStyle(color: kText, fontWeight: FontWeight.w800, letterSpacing: 1.5)),
+          TextSpan(text: kIsNina ? 'NA' : 'LA', style: TextStyle(color: kBlue, fontWeight: FontWeight.w800, letterSpacing: 1.5)),
         ]),
         style: TextStyle(fontSize: size * 0.62, fontFamily: 'serif'),
       ),
@@ -231,7 +224,7 @@ class PaywallScreen extends StatelessWidget {
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 460),
                 child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  const VelaLogo(size: 44),
+                  const BrandLogo(size: 44),
                   const SizedBox(height: 22),
                   Container(width: 72, height: 72, decoration: BoxDecoration(color: kBlue.withValues(alpha: .14), borderRadius: BorderRadius.circular(20)), child: const Icon(Icons.lock_rounded, color: kBlue, size: 36)),
                   const SizedBox(height: 16),
@@ -244,7 +237,7 @@ class PaywallScreen extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
                     decoration: BoxDecoration(color: kPanel, borderRadius: BorderRadius.circular(14), border: Border.all(color: kBlue)),
                     child: Row(children: [
-                      Expanded(child: Text('Vela · ${L.t('lifetime')}', style: const TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w700))),
+                      Expanded(child: Text('$kBrandName · ${L.t('lifetime')}', style: const TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w700))),
                       const Text('10 €', style: TextStyle(color: kBlue, fontSize: 24, fontWeight: FontWeight.w800)),
                     ]),
                   ),
@@ -321,7 +314,7 @@ class PlaylistExpiredScreen extends StatelessWidget {
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 460),
                 child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  const VelaLogo(size: 44),
+                  const BrandLogo(size: 44),
                   const SizedBox(height: 20),
                   Container(width: 66, height: 66, decoration: BoxDecoration(color: const Color(0xFFE0B366).withValues(alpha: .16), borderRadius: BorderRadius.circular(18)), child: const Icon(Icons.event_busy_rounded, color: Color(0xFFE0B366), size: 32)),
                   const SizedBox(height: 14),
@@ -386,7 +379,7 @@ class _ActivationScreenState extends State<ActivationScreen> {
       crossAxisAlignment: wide ? CrossAxisAlignment.start : CrossAxisAlignment.center,
       mainAxisSize: MainAxisSize.min,
       children: [
-        const VelaLogo(size: 34),
+        const BrandLogo(size: 34),
         const SizedBox(height: 12),
         Text(L.t('welcome'), textAlign: wide ? TextAlign.left : TextAlign.center, style: const TextStyle(color: kText, fontSize: 20, fontWeight: FontWeight.w800, fontFamily: 'serif')),
         const SizedBox(height: 3),
@@ -591,7 +584,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 460),
               child: Column(mainAxisSize: MainAxisSize.min, children: [
-                const VelaLogo(size: 44),
+                const BrandLogo(size: 44),
                 const SizedBox(height: 24),
                 Container(
                   padding: const EdgeInsets.all(22),
@@ -657,10 +650,10 @@ class _HomeScreenState extends State<HomeScreen> {
   void _open(BuildContext c, Widget s) => Navigator.of(c).push(MaterialPageRoute(builder: (_) => s)).then((_) { if (mounted) setState(() {}); });
 
   List<_Tile> _tiles(BuildContext c) => [
-        _Tile(L.t('home_live'), L.t('home_live_sub'), Icons.live_tv_rounded, const Color(0xFF6FB1F2), () => _open(c, const LiveScreen())),
-        _Tile(L.t('home_movies'), L.t('home_movies_sub'), Icons.movie_creation_rounded, const Color(0xFF8FA6F0), () => _open(c, CatalogScreen(title: L.t('home_movies'), type: 'vod'))),
-        _Tile(L.t('home_series'), L.t('home_series_sub'), Icons.theaters_rounded, const Color(0xFF6FD0C8), () => _open(c, CatalogScreen(title: L.t('home_series'), type: 'series'))),
-        _Tile(L.t('home_replay'), L.t('home_replay_sub'), Icons.replay_rounded, const Color(0xFFE0B366), () => _open(c, const LiveScreen(catchup: true))),
+        _Tile(L.t('home_live'), L.t('home_live_sub'), Icons.live_tv_rounded, kTileAccents[0], () => _open(c, const LiveScreen())),
+        _Tile(L.t('home_movies'), L.t('home_movies_sub'), Icons.movie_creation_rounded, kTileAccents[1], () => _open(c, CatalogScreen(title: L.t('home_movies'), type: 'vod'))),
+        _Tile(L.t('home_series'), L.t('home_series_sub'), Icons.theaters_rounded, kTileAccents[2], () => _open(c, CatalogScreen(title: L.t('home_series'), type: 'series'))),
+        _Tile(L.t('home_replay'), L.t('home_replay_sub'), Icons.replay_rounded, kTileAccents[3], () => _open(c, const LiveScreen(catchup: true))),
       ];
 
   @override
@@ -675,7 +668,7 @@ class _HomeScreenState extends State<HomeScreen> {
             padding: EdgeInsets.all(narrow ? 16 : 24),
             child: Column(children: [
               Row(children: [
-                const VelaLogo(size: 30),
+                const BrandLogo(size: 30),
                 const Spacer(),
                 _iconBox(Icons.search_rounded, onTap: () => _open(context, const SearchScreen())),
                 const SizedBox(width: 10),
@@ -754,6 +747,10 @@ class _HomeScreenState extends State<HomeScreen> {
     final tiles = _tiles(context);
     if (narrow) {
       return GridView.count(crossAxisCount: 2, mainAxisSpacing: 14, crossAxisSpacing: 14, childAspectRatio: 1.2, children: [for (int i = 0; i < tiles.length; i++) _tileCard(tiles[i], autofocus: i == 0)]);
+    }
+    if (kIsNina) {
+      // Nina: 2x2-Raster (Vela hat eine Reihe mit 4) -> eigenständiger Aufbau.
+      return GridView.count(crossAxisCount: 2, mainAxisSpacing: 16, crossAxisSpacing: 16, childAspectRatio: 2.3, children: [for (int i = 0; i < tiles.length; i++) _tileCard(tiles[i], autofocus: i == 0)]);
     }
     return Row(children: [
       for (int i = 0; i < tiles.length; i++) ...[
@@ -2086,7 +2083,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ]));
 
   Widget _about() => _panel(Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: const [
-        Text('Vela Player', style: TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w700)),
+        Text('$kBrandName Player', style: TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w700)),
         SizedBox(height: 8),
         Text('Version 1.0 · Beta', style: TextStyle(color: kMuted, fontSize: 13)),
       ]));

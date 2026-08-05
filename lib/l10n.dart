@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 import 'xtream.dart';
+import 'brand.dart';
 
 /// Leichtgewichtige App-Lokalisierung ohne Codegen.
 /// Reihenfolge der Werte je Schlüssel: [de, en, tr, ar, fr, it, el].
@@ -16,7 +17,7 @@ const List<List<String>> kLangs = [
 
 const List<String> _order = ['de', 'en', 'tr', 'ar', 'fr', 'it', 'el'];
 
-/// Bei Sprachwechsel erhöhen → App baut neu (siehe VelaApp).
+/// Bei Sprachwechsel erhöhen → App baut neu (siehe BrandApp).
 final ValueNotifier<int> langTick = ValueNotifier<int>(0);
 
 class L {
@@ -29,7 +30,9 @@ class L {
     final row = _m[key];
     if (row == null) return key;
     final v = _i < row.length ? row[_i] : '';
-    return v.isEmpty ? row[0] : v;
+    final s = v.isEmpty ? row[0] : v;
+    // {app} -> aktueller Markenname (Vela/Nina), damit Texte marken-neutral bleiben.
+    return s.contains('{app}') ? s.replaceAll('{app}', kBrandName) : s;
   }
 
   static Future<void> set(String code) async {
@@ -95,7 +98,7 @@ class L {
     's_subsize': ['Untertitelgröße', 'Subtitle size', 'Altyazı boyutu', 'حجم الترجمة', 'Taille des sous-titres', 'Dimensione sottotitoli', 'Μέγεθος υποτίτλων'],
     's_parental': ['Kindersicherung', 'Parental control', 'Ebeveyn kontrolü', 'الرقابة الأبوية', 'Contrôle parental', 'Controllo genitori', 'Γονικός έλεγχος'],
     's_hidden': ['Versteckte Kategorien', 'Hidden categories', 'Gizli kategoriler', 'الفئات المخفية', 'Catégories masquées', 'Categorie nascoste', 'Κρυφές κατηγορίες'],
-    's_about': ['Über Vela', 'About Vela', 'Vela hakkında', 'حول Vela', 'À propos de Vela', 'Informazioni su Vela', 'Σχετικά με το Vela'],
+    's_about': ['Über {app}', 'About {app}', '{app} hakkında', 'حول {app}', 'À propos de {app}', 'Informazioni su {app}', 'Σχετικά με το {app}'],
     's_language': ['Sprache', 'Language', 'Dil', 'اللغة', 'Langue', 'Lingua', 'Γλώσσα'],
     'buffer_desc': ['Wie viel Video vorab geladen wird. Bei Rucklern/Nachladen: höher stellen.', 'How much video is preloaded. Increase if playback stutters.', 'Ne kadar videonun önceden yükleneceği. Takılmada artırın.', 'مقدار الفيديو المحمّل مسبقًا. زده عند التقطيع.', 'Quantité de vidéo préchargée. Augmentez en cas de saccades.', 'Quanto video viene precaricato. Aumenta se scatta.', 'Πόσο βίντεο προφορτώνεται. Αυξήστε αν κολλάει.'],
     'buf_low': ['Niedrig', 'Low', 'Düşük', 'منخفض', 'Faible', 'Basso', 'Χαμηλό'],
@@ -136,7 +139,7 @@ class L {
     'type_live': ['Live', 'Live', 'Canlı', 'مباشر', 'Direct', 'Live', 'Ζωντανά'],
     'continue_watching': ['Weiterschauen', 'Continue watching', 'İzlemeye devam et', 'متابعة المشاهدة', 'Reprendre', 'Continua a guardare', 'Συνέχεια'],
     'retry': ['Erneut', 'Retry', 'Tekrar dene', 'إعادة', 'Réessayer', 'Riprova', 'Επανάληψη'],
-    'welcome': ['Willkommen bei Vela', 'Welcome to Vela', 'Vela\'ya hoş geldin', 'مرحبًا بك في Vela', 'Bienvenue sur Vela', 'Benvenuto su Vela', 'Καλώς ήρθες στο Vela'],
+    'welcome': ['Willkommen bei {app}', 'Welcome to {app}', '{app}\'ya hoş geldin', 'مرحبًا بك في {app}', 'Bienvenue sur {app}', 'Benvenuto su {app}', 'Καλώς ήρθες στο {app}'],
     'activate_intro': ['So verbindest du deine Playlist:', 'How to connect your playlist:', 'Oynatma listeni şöyle bağlarsın:', 'كيف تربط قائمتك:', 'Comment connecter votre playlist :', 'Come collegare la playlist:', 'Πώς να συνδέσεις τη λίστα σου:'],
     'device_code': ['Dein Geräte-Code', 'Your device code', 'Cihaz kodun', 'رمز جهازك', 'Votre code appareil', 'Il tuo codice dispositivo', 'Ο κωδικός συσκευής σου'],
     'mac_address': ['MAC-Adresse', 'MAC address', 'MAC adresi', 'عنوان MAC', 'Adresse MAC', 'Indirizzo MAC', 'Διεύθυνση MAC'],
@@ -152,7 +155,7 @@ class L {
     'last_free_day': ['Letzter Gratis-Tag', 'Last free day', 'Son ücretsiz gün', 'آخر يوم مجاني', 'Dernier jour gratuit', 'Ultimo giorno gratis', 'Τελευταία δωρεάν ημέρα'],
     'unlock': ['Freischalten', 'Unlock', 'Kilidi aç', 'فتح', 'Débloquer', 'Sblocca', 'Ξεκλείδωμα'],
     'paywall_title': ['Testzeitraum abgelaufen', 'Trial period ended', 'Deneme süresi bitti', 'انتهت الفترة التجريبية', 'Période d\'essai terminée', 'Periodo di prova terminato', 'Η δοκιμή έληξε'],
-    'paywall_body': ['Schalte Vela dauerhaft frei, um weiterzuschauen.', 'Unlock Vela permanently to keep watching.', 'İzlemeye devam etmek için Vela\'yı kalıcı olarak aç.', 'افتح Vela بشكل دائم للمتابعة.', 'Débloquez Vela définitivement pour continuer.', 'Sblocca Vela per sempre per continuare.', 'Ξεκλείδωσε το Vela μόνιμα για να συνεχίσεις.'],
+    'paywall_body': ['Schalte {app} dauerhaft frei, um weiterzuschauen.', 'Unlock {app} permanently to keep watching.', 'İzlemeye devam etmek için {app}\'yı kalıcı olarak aç.', 'افتح {app} بشكل دائم للمتابعة.', 'Débloquez {app} définitivement pour continuer.', 'Sblocca {app} per sempre per continuare.', 'Ξεκλείδωσε το {app} μόνιμα για να συνεχίσεις.'],
     'lifetime': ['Lifetime', 'Lifetime', 'Ömür boyu', 'مدى الحياة', 'À vie', 'A vita', 'Εφ\' όρου ζωής'],
     'buy_now': ['Jetzt kaufen', 'Buy now', 'Şimdi satın al', 'اشترِ الآن', 'Acheter maintenant', 'Acquista ora', 'Αγορά τώρα'],
     'restore': ['Kauf wiederherstellen', 'Restore purchase', 'Satın almayı geri yükle', 'استعادة الشراء', 'Restaurer l\'achat', 'Ripristina acquisto', 'Επαναφορά αγοράς'],
