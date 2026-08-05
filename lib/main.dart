@@ -1113,7 +1113,7 @@ class _LiveScreenState extends State<LiveScreen> {
                 ? _empty(error!)
                 : narrow
                     ? Column(children: [_catBar(), const SizedBox(height: 6), Expanded(child: _list())])
-                    : Row(children: [SizedBox(width: 240, child: _sidebar()), Expanded(child: _list())]),
+                    : Row(children: [SizedBox(width: kDesktop ? 320 : 240, child: _sidebar()), Expanded(child: _list())]),
       ),
     );
   }
@@ -1125,12 +1125,12 @@ class _LiveScreenState extends State<LiveScreen> {
           final s = catSel == i;
           return TvFocus(
             onTap: () => _selectCat(i),
-            radius: 10,
+            radius: 12,
             child: Container(
-              margin: const EdgeInsets.fromLTRB(12, 4, 6, 4),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-              decoration: BoxDecoration(color: s ? kBlue : Colors.transparent, borderRadius: BorderRadius.circular(10)),
-              child: Text(cats[i].name, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: s ? kBg : kText, fontWeight: FontWeight.w600, fontSize: 13.5)),
+              margin: EdgeInsets.fromLTRB(14, kDesktop ? 5 : 4, 8, kDesktop ? 5 : 4),
+              padding: EdgeInsets.symmetric(horizontal: kDesktop ? 18 : 14, vertical: kDesktop ? 16 : 13),
+              decoration: BoxDecoration(color: s ? kBlue : kPanel.withValues(alpha: .35), borderRadius: BorderRadius.circular(12), border: Border.all(color: s ? kBlue : kLine)),
+              child: Text(cats[i].name, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: s ? kBg : kText, fontWeight: FontWeight.w700, fontSize: kDesktop ? 16 : 13.5)),
             ),
           );
         },
@@ -1282,7 +1282,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
                 ? _empty(L.t('no_content'))
                 : narrow
                     ? Column(children: [_catBar(), Expanded(child: _grid())])
-                    : Row(children: [SizedBox(width: 240, child: _sidebar()), Expanded(child: _grid())]),
+                    : Row(children: [SizedBox(width: kDesktop ? 320 : 240, child: _sidebar()), Expanded(child: _grid())]),
       ),
     );
   }
@@ -1294,12 +1294,12 @@ class _CatalogScreenState extends State<CatalogScreen> {
           final s = catSel == i;
           return TvFocus(
             onTap: () => _selectCat(i),
-            radius: 10,
+            radius: 12,
             child: Container(
-              margin: const EdgeInsets.fromLTRB(12, 4, 6, 4),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-              decoration: BoxDecoration(color: s ? kBlue : Colors.transparent, borderRadius: BorderRadius.circular(10)),
-              child: Text(cats[i].name, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: s ? kBg : kText, fontWeight: FontWeight.w600, fontSize: 13.5)),
+              margin: EdgeInsets.fromLTRB(14, kDesktop ? 5 : 4, 8, kDesktop ? 5 : 4),
+              padding: EdgeInsets.symmetric(horizontal: kDesktop ? 18 : 14, vertical: kDesktop ? 16 : 13),
+              decoration: BoxDecoration(color: s ? kBlue : kPanel.withValues(alpha: .35), borderRadius: BorderRadius.circular(12), border: Border.all(color: s ? kBlue : kLine)),
+              child: Text(cats[i].name, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: s ? kBg : kText, fontWeight: FontWeight.w700, fontSize: kDesktop ? 16 : 13.5)),
             ),
           );
         },
