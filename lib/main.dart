@@ -658,6 +658,32 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  List<Item> _latestVod = [];
+  List<Item> _latestSeries = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLatest();
+  }
+
+  // „Zuletzt hinzugefügt" – nach Datum sortiert (Xtream). Bei M3U gibt es keine VOD/Serien.
+  Future<void> _loadLatest() async {
+    if (Session.mode != 'xtream') { return; }
+    try {
+      final vod = await Xtream.allVod();
+      vod.sort((a, b) => b.added.compareTo(a.added));
+      final series = await Xtream.allSeries();
+      series.sort((a, b) => b.added.compareTo(a.added));
+      if (mounted) {
+        setState(() {
+          _latestVod = vod.take(18).toList();
+          _latestSeries = series.take(18).toList();
+        });
+      }
+    } catch (_) {}
+  }
+
   void _open(BuildContext c, Widget s) => Navigator.of(c).push(MaterialPageRoute(builder: (_) => s)).then((_) { if (mounted) setState(() {}); });
 
   List<_Tile> _tiles(BuildContext c) => [
@@ -697,13 +723,24 @@ class _HomeScreenState extends State<HomeScreen> {
                   builder: (ctx, cons) => SingleChildScrollView(
                     child: ConstrainedBox(
                       constraints: BoxConstraints(minHeight: cons.maxHeight),
-                      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                        if (cont.isNotEmpty) ...[
-                          _continueRow(context, cont, narrow),
-                          SizedBox(height: narrow ? 14 : 18),
+                      child: Column(
+                        mainAxisAlignment: (_latestVod.isEmpty && _latestSeries.isEmpty) ? MainAxisAlignment.center : MainAxisAlignment.start,
+                        children: [
+                          if (cont.isNotEmpty) ...[
+                            _continueRow(context, cont, narrow),
+                            SizedBox(height: narrow ? 14 : 18),
+                          ],
+                          _grid(context, narrow),
+                          if (_latestVod.isNotEmpty) ...[
+                            SizedBox(height: narrow ? 16 : 22),
+                            _posterRow(context, L.t('latest_movies'), _latestVod, false, narrow),
+                          ],
+                          if (_latestSeries.isNotEmpty) ...[
+                            SizedBox(height: narrow ? 16 : 22),
+                            _posterRow(context, L.t('latest_series'), _latestSeries, true, narrow),
+                          ],
                         ],
-                        _grid(context, narrow),
-                      ]),
+                      ),
                     ),
                   ),
                 ),
@@ -760,6 +797,49 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ]),
                   ),
+                ]),
+              ),
+            );
+          },
+        ),
+      ),
+    ]);
+  }
+
+  // Poster-Reihe „Neueste Filme / Serien" (horizontal scrollbar).
+  Widget _posterRow(BuildContext context, String title, List<Item> items, bool isSeries, bool narrow) {
+    final h = narrow ? 152.0 : 190.0;
+    final w = narrow ? 100.0 : 128.0;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+      Padding(
+        padding: const EdgeInsets.only(left: 4, bottom: 8),
+        child: Text(title, style: const TextStyle(color: kText, fontSize: 15, fontWeight: FontWeight.w700, fontFamily: 'serif')),
+      ),
+      SizedBox(
+        height: h,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: items.length,
+          separatorBuilder: (_, _) => const SizedBox(width: 12),
+          itemBuilder: (ctx, i) {
+            final it = items[i];
+            return TvFocus(
+              radius: 10,
+              onTap: () => _open(context, isSeries ? SeriesDetailScreen(item: it) : MovieDetailScreen(item: it)),
+              child: SizedBox(
+                width: w,
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: SizedBox(
+                      width: w, height: h - 32,
+                      child: it.icon.isEmpty
+                          ? Container(color: kPanel2, child: Icon(isSeries ? Icons.theaters_rounded : Icons.movie_rounded, color: kMuted, size: 30))
+                          : Image.network(it.icon, fit: BoxFit.cover, errorBuilder: (_, _, _) => Container(color: kPanel2, child: Icon(isSeries ? Icons.theaters_rounded : Icons.movie_rounded, color: kMuted, size: 30))),
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(it.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kText, fontSize: 12, fontWeight: FontWeight.w600)),
                 ]),
               ),
             );

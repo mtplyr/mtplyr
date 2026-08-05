@@ -228,7 +228,8 @@ class Item {
   final String id, name, icon;
   final int num;
   final String ext; // container_extension (Filme)
-  Item(this.id, this.name, this.icon, {this.num = 0, this.ext = ''});
+  final int added; // Unix-Zeit „hinzugefügt" (für „Neueste …")
+  Item(this.id, this.name, this.icon, {this.num = 0, this.ext = '', this.added = 0});
 }
 
 class Xtream {
@@ -320,7 +321,8 @@ class Xtream {
     return j
         .map((e) => Item(e['stream_id'].toString(), (e['name'] ?? '').toString(),
             (e['stream_icon'] ?? e['cover'] ?? '').toString(),
-            ext: (e['container_extension'] ?? 'mp4').toString()))
+            ext: (e['container_extension'] ?? 'mp4').toString(),
+            added: int.tryParse('${e['added'] ?? ''}') ?? 0))
         .toList();
   }
 
@@ -329,7 +331,8 @@ class Xtream {
     final j = await _get('series');
     if (j is! List) return [];
     return j
-        .map((e) => Item(e['series_id'].toString(), (e['name'] ?? '').toString(), (e['cover'] ?? '').toString()))
+        .map((e) => Item(e['series_id'].toString(), (e['name'] ?? '').toString(), (e['cover'] ?? '').toString(),
+            added: int.tryParse('${e['last_modified'] ?? ''}') ?? 0))
         .toList();
   }
 

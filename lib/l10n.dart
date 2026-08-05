@@ -97,6 +97,8 @@ class L {
     'dl_none': ['Noch keine Downloads.', 'No downloads yet.', 'Henüz indirme yok.', 'لا توجد تنزيلات بعد.', 'Aucun téléchargement.', 'Nessun download.', 'Καμία λήψη ακόμη.'],
     'dl_offline': ['Offline', 'Offline', 'Çevrimdışı', 'دون اتصال', 'Hors ligne', 'Offline', 'Εκτός σύνδεσης'],
     'delete': ['Löschen', 'Delete', 'Sil', 'حذف', 'Supprimer', 'Elimina', 'Διαγραφή'],
+    'latest_movies': ['Neueste Filme', 'Latest movies', 'Yeni filmler', 'أحدث الأفلام', 'Nouveaux films', 'Ultimi film', 'Νέες ταινίες'],
+    'latest_series': ['Neueste Serien', 'Latest series', 'Yeni diziler', 'أحدث المسلسلات', 'Nouvelles séries', 'Ultime serie', 'Νέες σειρές'],
     'now': ['Jetzt', 'Now', 'Şimdi', 'الآن', 'En ce moment', 'Ora', 'Τώρα'],
     'pick_audio': ['Audiospur wählen', 'Select audio track', 'Ses parçası seç', 'اختر المسار الصوتي', 'Choisir la piste audio', 'Seleziona traccia audio', 'Επιλογή ήχου'],
     'pick_subs': ['Untertitel wählen', 'Select subtitles', 'Altyazı seç', 'اختر الترجمة', 'Choisir les sous-titres', 'Seleziona sottotitoli', 'Επιλογή υποτίτλων'],
