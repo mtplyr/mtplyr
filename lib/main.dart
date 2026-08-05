@@ -679,14 +679,19 @@ class _HomeScreenState extends State<HomeScreen> {
               ]),
               SizedBox(height: narrow ? 14 : 18),
               Expanded(
-                child: SingleChildScrollView(
-                  child: Column(children: [
-                    if (cont.isNotEmpty) ...[
-                      _continueRow(context, cont, narrow),
-                      SizedBox(height: narrow ? 14 : 18),
-                    ],
-                    _grid(context, narrow),
-                  ]),
+                child: LayoutBuilder(
+                  builder: (ctx, cons) => SingleChildScrollView(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(minHeight: cons.maxHeight),
+                      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                        if (cont.isNotEmpty) ...[
+                          _continueRow(context, cont, narrow),
+                          SizedBox(height: narrow ? 14 : 18),
+                        ],
+                        _grid(context, narrow),
+                      ]),
+                    ),
+                  ),
                 ),
               ),
             ]),
@@ -1788,15 +1793,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
         if (live) MaterialCustomButton(onPressed: () => _zap(1), icon: const Icon(Icons.skip_next_rounded, color: Colors.white)),
         MaterialCustomButton(onPressed: () => _tracks(true), icon: const Icon(Icons.audiotrack_rounded, color: Colors.white)),
         MaterialCustomButton(onPressed: () => _tracks(false), icon: const Icon(Icons.closed_caption_rounded, color: Colors.white)),
-        // Lautstärke: Stummschalt-Icon + kompakter Inline-Regler (kein Popup).
-        MaterialCustomButton(onPressed: () => _setVol(_vol <= 0 ? 100 : 0), icon: Icon(_vol <= 0 ? Icons.volume_off_rounded : Icons.volume_up_rounded, color: Colors.white)),
-        SizedBox(
-          width: 96,
-          child: SliderTheme(
-            data: const SliderThemeData(trackHeight: 3, overlayShape: RoundSliderOverlayShape(overlayRadius: 12), thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6)),
-            child: Slider(value: _vol.clamp(0, 100), min: 0, max: 100, activeColor: kBlue, inactiveColor: Colors.white30, onChanged: _setVol),
-          ),
-        ),
         MaterialCustomButton(onPressed: _cycleFit, icon: const Icon(Icons.aspect_ratio_rounded, color: Colors.white)),
       ],
     );
@@ -1841,6 +1837,41 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   decoration: BoxDecoration(color: Colors.black.withValues(alpha: .45), shape: BoxShape.circle, border: Border.all(color: Colors.white24)),
                   child: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 24),
                 ),
+              ),
+            ),
+          ),
+          // Lautstärke: vertikaler Regler mittig rechts. Außerhalb der media_kit-Steuerung,
+          // damit die Zieh-Geste sauber greift; immer erreichbar (oft benutzt).
+          Positioned(
+            right: ins(safe.right, 10), top: 0, bottom: 0,
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+                decoration: BoxDecoration(color: Colors.black.withValues(alpha: .38), borderRadius: BorderRadius.circular(26)),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  // oben: lauter (wie IBO)
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.volume_up_rounded, color: Colors.white, size: 22),
+                    onPressed: () => _setVol(100),
+                  ),
+                  RotatedBox(
+                    quarterTurns: 3,
+                    child: SizedBox(
+                      width: 150,
+                      child: SliderTheme(
+                        data: const SliderThemeData(trackHeight: 3, overlayShape: RoundSliderOverlayShape(overlayRadius: 12), thumbShape: RoundSliderThumbShape(enabledThumbRadius: 7)),
+                        child: Slider(value: _vol.clamp(0, 100), min: 0, max: 100, activeColor: kBlue, inactiveColor: Colors.white30, onChanged: _setVol),
+                      ),
+                    ),
+                  ),
+                  // unten: stumm (wie IBO)
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    icon: Icon(_vol <= 0 ? Icons.volume_off_rounded : Icons.volume_mute_rounded, color: Colors.white, size: 20),
+                    onPressed: () => _setVol(0),
+                  ),
+                ]),
               ),
             ),
           ),
