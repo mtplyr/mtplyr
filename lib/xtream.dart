@@ -14,6 +14,9 @@ const bool kOnWeb = identical(0, 0.0);
 /// Aktivierung: Hub-Endpunkt, der zu einem Geräte-Code die verknüpfte Playlist zurückgibt.
 const String kActivate = 'https://hub.mtplyr.com/api/vela_activate.php';
 
+/// Playlist an den Hub melden (App-seitige Eingabe erscheint dann auf velaplayer.com).
+const String kAddPlaylist = 'https://hub.mtplyr.com/api/playlist_add.php';
+
 /// Lizenz-/Trial-Status (an die MAC gebunden, serverseitig) — Quelle der Wahrheit.
 const String kLicense = 'https://hub.mtplyr.com/api/license_status.php';
 
@@ -74,27 +77,51 @@ class Session {
     return List.generate(6, (_) => r.nextInt(10)).join();
   }
 
-  /// Holt die dem MAC/Key zugewiesene Playlist vom Hub und richtet die Sitzung ein.
-  /// Xtream -> Account (live validiert). Reine M3U -> Senderliste laden. true = bereit.
-  static Future<bool> pullActivation() async {
-    if (mac.isEmpty) return false;
+  /// Server-Stand (velaplayer.com) holen UND anwenden — die Homepage ist die Wahrheit.
+  ///   'ok'    = Playlist vom Server geladen/aktualisiert (Sitzung eingerichtet)
+  ///   'none'  = Server erreichbar, aber KEINE Playlist mehr verknüpft (auf velaplayer.com gelöscht)
+  ///   'error' = Server nicht erreichbar / Provider-Aussetzer -> lokalen Stand behalten (offline)
+  static Future<String> syncFromActivation() async {
+    if (mac.isEmpty) return 'error';
     try {
       final uri = Uri.parse(kActivate).replace(queryParameters: {'mac': mac, 'key': deviceKey});
       final r = await http.get(uri).timeout(const Duration(seconds: 15));
-      if (r.statusCode != 200) return false;
+      if (r.statusCode != 200) return 'error';
       final j = jsonDecode(r.body);
-      if (j is! Map) return false;
+      if (j is! Map) return 'error';
       if ('${j['host'] ?? ''}'.isNotEmpty) {
         final a = Account('${j['host']}', '${j['username'] ?? j['user'] ?? ''}', '${j['password'] ?? j['pass'] ?? ''}');
-        if (await Xtream.userInfo(a) == null) return false; // live prüfen
+        if (await Xtream.userInfo(a) == null) return 'error'; // Provider gerade nicht erreichbar -> nicht löschen
         await save(a);
-        return true;
+        return 'ok';
       }
       if (j['message'] == 'm3u_only' && '${j['raw_url'] ?? ''}'.isNotEmpty) {
-        return await loadM3u('${j['raw_url']}');
+        return await loadM3u('${j['raw_url']}') ? 'ok' : 'error';
       }
+      // 'pending' = Gerät ohne (aktive) Playlist -> auf velaplayer.com gelöscht/noch keine.
+      if (j['message'] == 'pending') return 'none';
     } catch (_) {}
-    return false;
+    return 'error'; // expired/blocked/unbekannt: Lizenz-Gate regelt das, Playlist NICHT anfassen
+  }
+
+  /// Holt die dem MAC/Key zugewiesene Playlist vom Hub und richtet die Sitzung ein.
+  /// true = bereit (Xtream ODER M3U geladen).
+  static Future<bool> pullActivation() async => (await syncFromActivation()) == 'ok';
+
+  /// Manuell in der App eingegebene Xtream-Playlist an velaplayer.com melden,
+  /// damit sie dort (für Kunde/Reseller) sichtbar ist und der Server die Wahrheit bleibt.
+  /// true = auf dem Server gespeichert.
+  static Future<bool> pushXtreamToServer(Account a) async {
+    if (mac.isEmpty) return false;
+    try {
+      final r = await http.post(Uri.parse(kAddPlaylist), body: {
+        'mac': mac, 'key': deviceKey, 'brand': 'vela',
+        'type': 'xtream', 'xt_server': a.host, 'xt_user': a.user, 'xt_pass': a.pass,
+      }).timeout(const Duration(seconds: 20));
+      if (r.statusCode != 200) return false;
+      final j = jsonDecode(r.body);
+      return j is Map && j['success'] == true;
+    } catch (_) { return false; }
   }
 
   /// M3U-Playlist von einer URL laden, parsen und als aktive Quelle setzen.

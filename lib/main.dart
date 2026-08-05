@@ -172,9 +172,21 @@ class _HomeGateState extends State<HomeGate> {
   @override
   void initState() { super.initState(); _check(); }
 
+  bool needsActivation = false;
+
   Future<void> _check() async {
     await License.startTrial();
     await License.syncFromServer(); // Trial/paid an MAC gebunden (Server = Wahrheit)
+    // velaplayer.com ist die Wahrheit: Playlist dort gelöscht -> App verliert sie hier.
+    // 'error' (offline) lässt den lokalen Stand unangetastet, damit die App offline läuft.
+    if (Session.isReady) {
+      final plState = await Session.syncFromActivation();
+      if (plState == 'none') {
+        await Session.clear();
+        if (mounted) setState(() { needsActivation = true; loading = false; });
+        return;
+      }
+    }
     bool exp = License.simExpiredPlaylist;
     if (!exp && Session.account != null) {
       try {
@@ -193,6 +205,7 @@ class _HomeGateState extends State<HomeGate> {
   @override
   Widget build(BuildContext context) {
     if (loading) return Scaffold(body: Container(decoration: _bgDeco(), child: _loading()));
+    if (needsActivation || !Session.isReady) return const ActivationScreen();
     if (playlistExpired) return const PlaylistExpiredScreen();
     if (License.trialExpired) return const PaywallScreen();
     return const HomeScreen();
@@ -360,6 +373,60 @@ class _ActivationScreenState extends State<ActivationScreen> {
   bool busy = false;
   String? msg;
 
+  // Querformat = breit & niedrig -> zwei Spalten, damit nichts scrollen muss.
+  bool _wideAct(BuildContext c) => MediaQuery.of(c).size.width > 700;
+
+  Widget _actHeader(BuildContext context) {
+    final wide = _wideAct(context);
+    return Column(
+      crossAxisAlignment: wide ? CrossAxisAlignment.start : CrossAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const VelaLogo(size: 34),
+        const SizedBox(height: 12),
+        Text(L.t('welcome'), textAlign: wide ? TextAlign.left : TextAlign.center, style: const TextStyle(color: kText, fontSize: 20, fontWeight: FontWeight.w800, fontFamily: 'serif')),
+        const SizedBox(height: 3),
+        Text(L.t('activate_intro'), textAlign: wide ? TextAlign.left : TextAlign.center, style: const TextStyle(color: kMuted, fontSize: 13)),
+        const SizedBox(height: 14),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+          decoration: BoxDecoration(color: kPanel, borderRadius: BorderRadius.circular(14), border: Border.all(color: kLine)),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            _idRow(L.t('mac_address'), Session.mac),
+            const Divider(color: kLine, height: 18),
+            _idRow(L.t('device_key_label'), Session.deviceKey),
+          ]),
+        ),
+      ],
+    );
+  }
+
+  Widget _actSteps(BuildContext context) => Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _step('1', '${L.t('activate_s1')}  $kPortal'),
+          _step('2', L.t('activate_s2')),
+          _step('3', L.t('activate_s3')),
+          if (msg != null) Padding(padding: const EdgeInsets.only(bottom: 10), child: Text(msg!, textAlign: TextAlign.center, style: const TextStyle(color: Color(0xFFF2A0A0), fontSize: 13))),
+          SizedBox(
+            height: 48,
+            child: FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: kBlue, foregroundColor: kBg, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11))),
+              onPressed: busy ? null : _check,
+              child: busy
+                  ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: kBg))
+                  : Text(L.t('activate_check'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ConnectScreen())),
+            child: Text(L.t('activate_manual'), style: const TextStyle(color: kMuted, fontSize: 13)),
+          ),
+        ],
+      );
+
   Future<void> _check() async {
     setState(() { busy = true; msg = null; });
     final ok = await Session.pullActivation(); // Xtream ODER M3U
@@ -407,46 +474,18 @@ class _ActivationScreenState extends State<ActivationScreen> {
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(24),
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 560),
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  const VelaLogo(size: 44),
-                  const SizedBox(height: 16),
-                  Text(L.t('welcome'), textAlign: TextAlign.center, style: const TextStyle(color: kText, fontSize: 22, fontWeight: FontWeight.w800, fontFamily: 'serif')),
-                  const SizedBox(height: 4),
-                  Text(L.t('activate_intro'), style: const TextStyle(color: kMuted, fontSize: 13.5)),
-                  const SizedBox(height: 20),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-                    decoration: BoxDecoration(color: kPanel, borderRadius: BorderRadius.circular(14), border: Border.all(color: kLine)),
-                    child: Column(children: [
-                      _idRow(L.t('mac_address'), Session.mac),
-                      const Divider(color: kLine, height: 20),
-                      _idRow(L.t('device_key_label'), Session.deviceKey),
-                    ]),
-                  ),
-                  const SizedBox(height: 22),
-                  _step('1', '${L.t('activate_s1')}  $kPortal'),
-                  _step('2', L.t('activate_s2')),
-                  _step('3', L.t('activate_s3')),
-                  const SizedBox(height: 8),
-                  if (msg != null) Padding(padding: const EdgeInsets.only(bottom: 12), child: Text(msg!, textAlign: TextAlign.center, style: const TextStyle(color: Color(0xFFF2A0A0), fontSize: 13))),
-                  SizedBox(
-                    width: double.infinity, height: 50,
-                    child: FilledButton(
-                      style: FilledButton.styleFrom(backgroundColor: kBlue, foregroundColor: kBg, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11))),
-                      onPressed: busy ? null : _check,
-                      child: busy
-                          ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: kBg))
-                          : Text(L.t('activate_check'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  TextButton(
-                    onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ConnectScreen())),
-                    child: Text(L.t('activate_manual'), style: const TextStyle(color: kMuted, fontSize: 13)),
-                  ),
-                ]),
+                constraints: BoxConstraints(maxWidth: _wideAct(context) ? 780 : 460),
+                child: _wideAct(context)
+                    ? Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+                        Expanded(child: _actHeader(context)),
+                        const SizedBox(width: 28),
+                        Expanded(child: _actSteps(context)),
+                      ])
+                    : Column(mainAxisSize: MainAxisSize.min, children: [
+                        _actHeader(context),
+                        const SizedBox(height: 18),
+                        _actSteps(context),
+                      ]),
               ),
             ),
           ),
@@ -479,7 +518,20 @@ class _ConnectScreenState extends State<ConnectScreen> {
       setState(() { busy = false; err = L.t('connect_err'); });
       return;
     }
-    await Session.save(a);
+    // Playlist an velaplayer.com melden -> erscheint dort (Kunde/Reseller), Server = Wahrheit.
+    final pushed = await Session.pushXtreamToServer(a);
+    if (!mounted) return;
+    if (!pushed) {
+      setState(() { busy = false; err = L.t('server_save_err'); });
+      return;
+    }
+    // App zieht die jetzt server-hinterlegte Playlist (identisch zum velaplayer.com-Weg).
+    final ok = await Session.pullActivation();
+    if (!mounted) return;
+    if (!ok) {
+      setState(() { busy = false; err = L.t('server_save_err'); });
+      return;
+    }
     await License.startTrial();
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const HomeGate()), (_) => false);
@@ -2087,6 +2139,40 @@ class _AccountScreenState extends State<AccountScreen> {
     Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const ActivationScreen()), (_) => false);
   }
 
+  /// Playlist erneut von velaplayer.com holen (fragt vorher nach). Holt den
+  /// aktuellen Server-Stand — löscht/ändert man dort die Playlist, greift es hier.
+  Future<void> _reload() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: kPanel,
+        title: Text(L.t('reload_playlist'), style: const TextStyle(color: kText)),
+        content: Text(L.t('reload_confirm'), style: const TextStyle(color: kMuted)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(L.t('cancel'))),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: Text(L.t('reload'))),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() => loading = true);
+    final st = await Session.syncFromActivation(); // frischer Server-Stand (velaplayer.com = Wahrheit)
+    if (!mounted) return;
+    if (st == 'ok') {
+      // Sitzung evtl. geändert → alles frisch aufbauen (Gate prüft Lizenz + Playlist neu).
+      Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const HomeGate()), (_) => false);
+    } else if (st == 'none') {
+      // Auf velaplayer.com gelöscht → lokale Playlist entfernen, App spielt nichts mehr.
+      await Session.clear();
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const ActivationScreen()), (_) => false);
+    } else {
+      // Server/Provider gerade nicht erreichbar → lokalen Stand behalten.
+      setState(() => loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(backgroundColor: kPanel, content: Text(L.t('reload_offline'), style: const TextStyle(color: kText))));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final i = info ?? {};
@@ -2099,7 +2185,8 @@ class _AccountScreenState extends State<AccountScreen> {
       [L.t('acc_trial'), ('${i['is_trial']}' == '1') ? L.t('yes') : L.t('no'), Icons.verified_user_rounded, false],
       [L.t('acc_created'), _tsDate(i['created_at']), Icons.calendar_month_rounded, false],
     ];
-    final cols = _narrow(context) ? 1 : 2;
+    // Querformat: 3 Spalten (2 Reihen) -> alles ohne Scrollen sichtbar.
+    final cols = _narrow(context) ? 1 : (MediaQuery.of(context).size.width > 700 ? 3 : 2);
     return Scaffold(
       appBar: _subBar(context, L.t('account_title'), actions: [
         TextButton.icon(onPressed: _logout, icon: const Icon(Icons.logout_rounded, color: kMuted, size: 18), label: Text(L.t('logout'), style: const TextStyle(color: kMuted))),
@@ -2107,12 +2194,24 @@ class _AccountScreenState extends State<AccountScreen> {
       ]),
       body: Container(
         decoration: _bgDeco(),
-        child: loading
+        child: SafeArea(
+          child: loading
             ? _loading()
             : Padding(
                 padding: const EdgeInsets.all(20),
                 child: Column(children: [
                   _idPanel(context), // MAC + Geräteschlüssel — immer sichtbar
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 46,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(side: const BorderSide(color: kBlue), foregroundColor: kBlue),
+                      onPressed: _reload,
+                      icon: const Icon(Icons.refresh_rounded, size: 20),
+                      label: Text(L.t('reload_playlist'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                    ),
+                  ),
                   const SizedBox(height: 16),
                   Expanded(
                     child: GridView.builder(
@@ -2125,10 +2224,10 @@ class _AccountScreenState extends State<AccountScreen> {
                           decoration: BoxDecoration(color: kPanel.withValues(alpha: .5), borderRadius: BorderRadius.circular(12), border: Border.all(color: kLine)),
                           child: Row(children: [
                             Icon(data[idx][2] as IconData, color: kBlue, size: 22),
-                            const SizedBox(width: 14),
-                            Text(data[idx][0] as String, style: const TextStyle(color: kText, fontWeight: FontWeight.w700, fontSize: 15)),
-                            const Spacer(),
-                            Text(data[idx][1] as String, style: TextStyle(color: ok ? kOk : kText, fontWeight: FontWeight.w600, fontSize: 14.5)),
+                            const SizedBox(width: 12),
+                            Expanded(child: Text(data[idx][0] as String, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kText, fontWeight: FontWeight.w700, fontSize: 14.5))),
+                            const SizedBox(width: 8),
+                            Text(data[idx][1] as String, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: ok ? kOk : kText, fontWeight: FontWeight.w600, fontSize: 14)),
                           ]),
                         );
                       },
@@ -2136,6 +2235,7 @@ class _AccountScreenState extends State<AccountScreen> {
                   ),
                 ]),
               ),
+        ),
       ),
     );
   }
