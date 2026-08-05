@@ -1811,7 +1811,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       seekBarColor: Colors.white24,
       seekBarPositionColor: kBlue,
       seekBarThumbColor: kBlue,
-      seekBarMargin: EdgeInsets.only(bottom: kDesktop ? 74 : 56, left: ins(safe.left, 20), right: ins(safe.right, 20)),
+      seekBarMargin: EdgeInsets.only(bottom: kDesktop ? 98 : 64, left: ins(safe.left, 20), right: ins(safe.right, 20)),
       bottomButtonBarMargin: EdgeInsets.only(bottom: kDesktop ? 22 : 12, left: ins(safe.left, 20), right: ins(safe.right, 20)),
       topButtonBarMargin: EdgeInsets.only(top: ins(safe.top, 8), left: 4, right: ins(safe.right, 10)),
       // Große zentrierte Transport-Tasten (Maus-freundlich, wie IBO).
