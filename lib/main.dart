@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show ImageFilter;
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -662,6 +663,7 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Item> _latestSeries = [];
   final ScrollController _movieScroll = ScrollController();
   final ScrollController _seriesScroll = ScrollController();
+  final ScrollController _favScroll = ScrollController();
 
   @override
   void initState() {
@@ -673,6 +675,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _movieScroll.dispose();
     _seriesScroll.dispose();
+    _favScroll.dispose();
     super.dispose();
   }
 
@@ -701,6 +704,9 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final narrow = _narrow(context);
     final cont = ContinueStore.items();
+    final favSeries = FavStore.items('series');
+    final favs = [...favSeries, ...FavStore.items('vod')];
+    final favSeriesIds = favSeries.map((e) => e.id).toSet();
     return Scaffold(
       body: Container(
         decoration: _bgDeco(),
@@ -733,6 +739,10 @@ class _HomeScreenState extends State<HomeScreen> {
                           if (cont.isNotEmpty) ...[
                             _continueRow(context, cont, narrow),
                             SizedBox(height: narrow ? 14 : 18),
+                          ],
+                          if (favs.isNotEmpty) ...[
+                            _posterRow(context, '★ ${L.t('favorites')}', favs, false, narrow, _favScroll, seriesOf: (it) => favSeriesIds.contains(it.id), centerFew: false),
+                            SizedBox(height: narrow ? 16 : 22),
                           ],
                           _grid(context, narrow),
                           if (_latestVod.isNotEmpty) ...[
@@ -812,7 +822,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Poster-Reihe „Neueste Filme / Serien" — mittig, mit dezenten Blätter-Pfeilen
   // links/rechts. ~5–6 sichtbar, 10 geladen (Rest durch Blättern).
-  Widget _posterRow(BuildContext context, String title, List<Item> items, bool isSeries, bool narrow, ScrollController ctrl) {
+  Widget _posterRow(BuildContext context, String title, List<Item> items, bool isSeries, bool narrow, ScrollController ctrl, {bool Function(Item)? seriesOf, bool centerFew = true}) {
     final h = narrow ? 168.0 : 250.0;
     final w = narrow ? 110.0 : 172.0;
     void nudge(int dir) {
@@ -829,9 +839,9 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Icon(icon, color: kMuted, size: 24),
           ),
         );
-    Widget poster(Item it) => TvFocus(
+    Widget poster(Item it) { final s = seriesOf?.call(it) ?? isSeries; return TvFocus(
           radius: 12,
-          onTap: () => _open(context, isSeries ? SeriesDetailScreen(item: it) : MovieDetailScreen(item: it)),
+          onTap: () => _open(context, s ? SeriesDetailScreen(item: it) : MovieDetailScreen(item: it)),
           child: SizedBox(
             width: w,
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -840,8 +850,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: SizedBox(
                   width: w, height: h - 34,
                   child: it.icon.isEmpty
-                      ? Container(color: kPanel2, child: Icon(isSeries ? Icons.theaters_rounded : Icons.movie_rounded, color: kMuted, size: 34))
-                      : Image.network(it.icon, fit: BoxFit.cover, errorBuilder: (_, _, _) => Container(color: kPanel2, child: Icon(isSeries ? Icons.theaters_rounded : Icons.movie_rounded, color: kMuted, size: 34))),
+                      ? Container(color: kPanel2, child: Icon(s ? Icons.theaters_rounded : Icons.movie_rounded, color: kMuted, size: 34))
+                      : Image.network(it.icon, fit: BoxFit.cover, errorBuilder: (_, _, _) => Container(color: kPanel2, child: Icon(s ? Icons.theaters_rounded : Icons.movie_rounded, color: kMuted, size: 34))),
                 ),
               ),
               const SizedBox(height: 5),
@@ -849,6 +859,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ]),
           ),
         );
+    }
     return Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
       Padding(
         padding: const EdgeInsets.only(left: 4, bottom: 8),
@@ -861,14 +872,13 @@ class _HomeScreenState extends State<HomeScreen> {
           final content = items.length * w + (items.length - 1) * gap;
           // Passt alles rein -> mittig, ohne Pfeile. Sonst -> Pfeile + scrollende Liste.
           if (content <= cons.maxWidth) {
-            return Center(
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                for (int i = 0; i < items.length; i++) ...[
-                  if (i > 0) const SizedBox(width: gap),
-                  poster(items[i]),
-                ],
-              ]),
-            );
+            final row = Row(mainAxisSize: MainAxisSize.min, children: [
+              for (int i = 0; i < items.length; i++) ...[
+                if (i > 0) const SizedBox(width: gap),
+                poster(items[i]),
+              ],
+            ]);
+            return centerFew ? Center(child: row) : Align(alignment: Alignment.centerLeft, child: row);
           }
           return Row(children: [
             arrow(Icons.chevron_left_rounded, () => nudge(-1)),
@@ -909,7 +919,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     // Vela breit: eine Reihe mit 4 Kacheln, Höhe begrenzt.
     return SizedBox(
-      height: 200,
+      height: 172,
       child: Row(children: [
         for (int i = 0; i < tiles.length; i++) ...[
           Expanded(child: card(i)),
@@ -932,16 +942,12 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Container(
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [kPanel, kBg2]), borderRadius: BorderRadius.circular(18), border: Border.all(color: kLine)),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              Container(width: 58, height: 58, decoration: BoxDecoration(color: t.accent.withValues(alpha: .16), borderRadius: BorderRadius.circular(16)), child: Icon(t.icon, color: t.accent, size: 32)),
-              const Spacer(),
-              const Icon(Icons.north_east_rounded, color: kMuted, size: 22),
-            ]),
-            const Spacer(),
-            Text(t.label, style: const TextStyle(color: kText, fontSize: 21, fontWeight: FontWeight.w800, fontFamily: 'serif')),
-            const SizedBox(height: 3),
-            Text(t.subtitle, style: const TextStyle(color: kMuted, fontSize: 13)),
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.center, children: [
+            Container(width: 62, height: 62, decoration: BoxDecoration(color: t.accent.withValues(alpha: .16), borderRadius: BorderRadius.circular(16)), child: Icon(t.icon, color: t.accent, size: 34)),
+            const SizedBox(height: 14),
+            Text(t.label, textAlign: TextAlign.center, style: const TextStyle(color: kText, fontSize: 21, fontWeight: FontWeight.w800, fontFamily: 'serif')),
+            const SizedBox(height: 4),
+            Text(t.subtitle, textAlign: TextAlign.center, style: const TextStyle(color: kMuted, fontSize: 13)),
           ]),
         ),
       );
@@ -981,13 +987,23 @@ Widget dlControl(BuildContext context, {required String key, required String tit
       else if (st == 'error') { icon = Icons.error_outline_rounded; color = const Color(0xFFF2A0A0); onTap = () => Downloads.add(key: key, title: title, url: url, ext: ext, poster: poster); label = L.t('retry'); }
       else { icon = Icons.download_rounded; onTap = () => Downloads.add(key: key, title: title, url: url, ext: ext, poster: poster); label = L.t('download'); }
       if (compact) return IconButton(tooltip: label, icon: Icon(icon, color: color, size: 22), onPressed: onTap);
-      return SizedBox(
-        height: 52,
-        child: OutlinedButton.icon(
-          style: OutlinedButton.styleFrom(side: BorderSide(color: color), foregroundColor: color, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-          onPressed: onTap,
-          icon: Icon(icon, size: 20),
-          label: Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
+      return Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: onTap,
+          child: Container(
+            height: 52,
+            alignment: Alignment.center,
+            padding: const EdgeInsets.symmetric(horizontal: 26),
+            decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), border: Border.all(color: color, width: 1.5)),
+            child: Row(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.center, children: [
+              Icon(icon, size: 18, color: color),
+              const SizedBox(width: 8),
+              Transform.translate(offset: const Offset(0, -2), child: Text(label, style: TextStyle(fontWeight: FontWeight.w800, color: color, height: 1.0, leadingDistribution: TextLeadingDistribution.even))),
+            ]),
+          ),
         ),
       );
     },
@@ -1088,7 +1104,7 @@ class _LiveScreenState extends State<LiveScreen> {
   Future<void> _selectCat(int i) async {
     setState(() { catSel = i; loadingChans = true; chans = []; query = ''; });
     if (cats[i].id == '__fav__') {
-      setState(() { chans = FavStore.items(); loadingChans = false; });
+      setState(() { chans = FavStore.items('live'); loadingChans = false; });
       return;
     }
     try {
@@ -1186,7 +1202,7 @@ class _LiveScreenState extends State<LiveScreen> {
                 itemCount: items.length,
                 itemBuilder: (c, i) {
                   final ch = items[i];
-                  final fav = FavStore.isFav(ch.id);
+                  final fav = FavStore.isFav(ch.id, 'live');
                   return TvFocus(
                     radius: 10,
                     autofocus: i == 0,
@@ -1208,7 +1224,7 @@ class _LiveScreenState extends State<LiveScreen> {
                         IconButton(
                           visualDensity: VisualDensity.compact,
                           icon: Icon(fav ? Icons.star_rounded : Icons.star_border_rounded, color: fav ? kBlue : kMuted, size: 20),
-                          onPressed: () async { await FavStore.toggle(ch); if (mounted) setState(() {}); },
+                          onPressed: () async { await FavStore.toggle(ch, 'live'); if (mounted) setState(() {}); },
                         ),
                         const Icon(Icons.play_circle_outline_rounded, color: kMuted, size: 20),
                       ]),
@@ -1248,22 +1264,55 @@ class _CatalogScreenState extends State<CatalogScreen> {
     _loadCats();
   }
 
+  List<Item>? _allCache; // „Alle" wird im Hintergrund vorgeladen
+  String get _favKind => widget.type == 'series' ? 'series' : 'vod';
+
   Future<void> _loadCats() async {
     try {
       final c = await Xtream.categories(widget.type);
       if (!mounted) return;
-      setState(() { cats = c; loadingCats = false; });
-      if (c.isNotEmpty) _selectCat(0);
+      // Reihenfolge: Favoriten, Alle, dann die echten Kategorien. Start = Favoriten.
+      setState(() {
+        cats = [Category('__fav__', '★ ${L.t('favorites')}'), Category('__all__', L.t('all_cat')), ...c];
+        loadingCats = false;
+      });
+      _selectCat(0);   // startet auf Favoriten
+      _preloadAll();   // „Alle" schon im Hintergrund laden, auch wenn man bei Favoriten anfängt
     } catch (_) {
       if (mounted) setState(() => loadingCats = false);
     }
   }
 
+  Future<void> _preloadAll() async {
+    if (_allCache != null) return;
+    try {
+      final list = widget.type == 'series' ? await Xtream.allSeries() : await Xtream.allVod();
+      if (!mounted) return;
+      _allCache = list;
+      // Falls der Nutzer inzwischen auf „Alle" gewechselt hat: direkt anzeigen.
+      if (catSel < cats.length && cats[catSel].id == '__all__') {
+        setState(() { items = list; loadingItems = false; });
+      }
+    } catch (_) {}
+  }
+
   Future<void> _selectCat(int i) async {
     setState(() { catSel = i; loadingItems = true; items = []; query = ''; });
+    final id = cats[i].id;
+    if (id == '__fav__') {
+      setState(() { items = FavStore.items(_favKind); loadingItems = false; });
+      return;
+    }
+    if (id == '__all__' && _allCache != null) {
+      setState(() { items = _allCache!; loadingItems = false; });
+      return;
+    }
     try {
-      final list = widget.type == 'series' ? await Xtream.seriesList(cats[i].id) : await Xtream.vodStreams(cats[i].id);
+      final list = id == '__all__'
+          ? (widget.type == 'series' ? await Xtream.allSeries() : await Xtream.allVod())
+          : (widget.type == 'series' ? await Xtream.seriesList(id) : await Xtream.vodStreams(id));
       if (!mounted) return;
+      if (id == '__all__') _allCache = list;
       setState(() { items = list; loadingItems = false; });
     } catch (_) {
       if (mounted) setState(() => loadingItems = false);
@@ -1349,7 +1398,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
       ),
       Expanded(
         child: list.isEmpty
-            ? _empty(L.t('no_hits'))
+            ? _empty(cats[catSel].id == '__fav__' ? L.t('no_fav') : L.t('no_hits'))
             : LayoutBuilder(builder: (c, cons) {
                 final cols = (cons.maxWidth / 130).floor().clamp(2, 8);
                 return GridView.builder(
@@ -1365,8 +1414,13 @@ class _CatalogScreenState extends State<CatalogScreen> {
 
   Widget _poster(Item it) => TvFocus(
         radius: 10,
-        onTap: () => Navigator.of(context).push(MaterialPageRoute(
-            builder: (_) => widget.type == 'series' ? SeriesDetailScreen(item: it) : MovieDetailScreen(item: it))),
+        onTap: () async {
+          await Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => widget.type == 'series' ? SeriesDetailScreen(item: it) : MovieDetailScreen(item: it)));
+          // Zurück aus dem Detail: falls wir auf „Favoriten" stehen, neu laden
+          // (der Nutzer hat evtl. gerade einen Favoriten hinzugefügt/entfernt).
+          if (mounted && cats[catSel].id == '__fav__') _selectCat(catSel);
+        },
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Expanded(
             child: ClipRRect(
@@ -1386,6 +1440,72 @@ class _CatalogScreenState extends State<CatalogScreen> {
 }
 
 // ============================ SUCHE ============================
+// Generischer Hover-Zoom: skaliert sein Kind beim Drübergehen mit der Maus.
+class _HoverScale extends StatefulWidget {
+  final Widget child;
+  const _HoverScale({required this.child});
+  @override
+  State<_HoverScale> createState() => _HoverScaleState();
+}
+
+class _HoverScaleState extends State<_HoverScale> {
+  bool _h = false;
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+        onEnter: (_) => setState(() => _h = true),
+        onExit: (_) => setState(() => _h = false),
+        child: AnimatedScale(
+          scale: _h ? 1.09 : 1.0,
+          duration: const Duration(milliseconds: 150),
+          curve: Curves.easeOut,
+          child: widget.child,
+        ),
+      );
+}
+
+// Klebende, farbcodierte Block-Überschrift (Filme/Serien/Live) für die Suche.
+// Bleibt beim Scrollen oben stehen -> jederzeit klar, welcher Block gerade läuft.
+class _StickySection extends SliverPersistentHeaderDelegate {
+  final String title;
+  final int count;
+  final IconData icon;
+  final Color color;
+  const _StickySection({required this.title, required this.count, required this.icon, required this.color});
+
+  @override
+  double get minExtent => 52;
+  @override
+  double get maxExtent => 52;
+
+  @override
+  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+    return Container(
+      color: kBg,
+      alignment: Alignment.centerLeft,
+      padding: const EdgeInsets.only(top: 10, bottom: 8),
+      child: Row(children: [
+        Container(
+          padding: const EdgeInsets.all(7),
+          decoration: BoxDecoration(color: color.withValues(alpha: .18), borderRadius: BorderRadius.circular(9)),
+          child: Icon(icon, color: color, size: 18),
+        ),
+        const SizedBox(width: 10),
+        Text(title, style: const TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w800)),
+        const SizedBox(width: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 2),
+          decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(11)),
+          child: Text('$count', style: const TextStyle(color: kBg, fontSize: 12.5, fontWeight: FontWeight.w800)),
+        ),
+      ]),
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _StickySection old) =>
+      old.title != title || old.count != count || old.color != color || old.icon != icon;
+}
+
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
   @override
@@ -1396,7 +1516,7 @@ class _SearchScreenState extends State<SearchScreen> {
   List<Item> vod = [], series = [], live = [];
   bool loading = true;
   String query = '';
-  int tab = 0; // 0 = Filme, 1 = Serien, 2 = Live
+  int tab = 0; // 0 = Alle (gruppiert), 1 = Filme, 2 = Serien, 3 = Live
 
   @override
   void initState() {
@@ -1414,10 +1534,31 @@ class _SearchScreenState extends State<SearchScreen> {
     if (mounted) setState(() => loading = false);
   }
 
+  List<Item> _match(List<Item> src) =>
+      src.where((e) => e.name.toLowerCase().contains(query.toLowerCase())).take(80).toList();
+
   @override
   Widget build(BuildContext context) {
-    final src = tab == 0 ? vod : (tab == 1 ? series : live);
-    final results = query.length < 2 ? <Item>[] : src.where((e) => e.name.toLowerCase().contains(query.toLowerCase())).take(80).toList();
+    final q = query.trim().length >= 2;
+    final mVod = q ? _match(vod) : const <Item>[];
+    final mSeries = q ? _match(series) : const <Item>[];
+    final mLive = q ? _match(live) : const <Item>[];
+    final anyHit = mVod.isNotEmpty || mSeries.isNotEmpty || mLive.isNotEmpty;
+
+    Widget body;
+    if (loading) {
+      body = _loading();
+    } else if (!q) {
+      body = _empty(L.t('search_min2'));
+    } else if (tab == 0) {
+      body = anyHit ? _grouped(mVod, mSeries, mLive) : _empty(L.t('no_hits'));
+    } else if (tab == 3) {
+      body = mLive.isEmpty ? _empty(L.t('no_hits')) : _liveList(mLive);
+    } else {
+      final r = tab == 1 ? mVod : mSeries;
+      body = r.isEmpty ? _empty(L.t('no_hits')) : _grid(r, tab == 2);
+    }
+
     return Scaffold(
       appBar: _subBar(context, L.t('search_title')),
       body: Container(
@@ -1440,7 +1581,7 @@ class _SearchScreenState extends State<SearchScreen> {
               ),
               const SizedBox(height: 10),
               Row(children: [
-                for (final t in [[0, L.t('home_movies')], [1, L.t('home_series')], [2, L.t('type_live')]])
+                for (final t in [[0, L.t('all_cat')], [1, L.t('home_movies')], [2, L.t('home_series')], [3, L.t('type_live')]])
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
                     child: GestureDetector(
@@ -1454,24 +1595,7 @@ class _SearchScreenState extends State<SearchScreen> {
                   ),
               ]),
               const SizedBox(height: 10),
-              Expanded(
-                child: loading
-                    ? _loading()
-                    : query.length < 2
-                        ? _empty(L.t('search_min2'))
-                        : results.isEmpty
-                            ? _empty(L.t('no_hits'))
-                            : tab == 2
-                                ? _liveList(results)
-                                : LayoutBuilder(builder: (c, cons) {
-                                    final cols = (cons.maxWidth / 130).floor().clamp(2, 8);
-                                    return GridView.builder(
-                                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: cols, mainAxisSpacing: 12, crossAxisSpacing: 12, childAspectRatio: .58),
-                                      itemCount: results.length,
-                                      itemBuilder: (c, i) => _poster(results[i]),
-                                    );
-                                  }),
-              ),
+              Expanded(child: body),
             ]),
           ),
         ),
@@ -1479,41 +1603,105 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
+  Widget _grid(List<Item> r, bool isSeries) => LayoutBuilder(builder: (c, cons) {
+        final cols = (cons.maxWidth / 150).floor().clamp(2, 10);
+        return GridView.builder(
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: cols, mainAxisSpacing: 14, crossAxisSpacing: 14, childAspectRatio: .58),
+          itemCount: r.length,
+          itemBuilder: (c, i) => _gridPoster(r[i], isSeries),
+        );
+      });
+
+  // „Alle": eine saubere Liste, jede Zeile mit Typ-Etikett (FILM/SERIE/LIVE).
+  // Reihenfolge Filme -> Serien -> Live; per Etikett sofort erkennbar was was ist.
+  // „Alle": IBO-artige Poster-Blöcke pro Typ (Filme/Serien/Live) mit farbiger,
+  // klebender Überschrift. Senkrecht scrollend -> alles per Mausrad erreichbar.
+  Widget _grouped(List<Item> mv, List<Item> ms, List<Item> ml) => LayoutBuilder(builder: (c, cons) {
+        final cols = (cons.maxWidth / 165).floor().clamp(2, 9);
+        final posterGrid = SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: cols, mainAxisSpacing: 16, crossAxisSpacing: 16, childAspectRatio: .56);
+        final tileGrid = SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: cols, mainAxisSpacing: 16, crossAxisSpacing: 16, childAspectRatio: .82);
+        return CustomScrollView(slivers: [
+          if (mv.isNotEmpty) ...[
+            SliverPersistentHeader(pinned: true, delegate: _StickySection(title: L.t('home_movies'), count: mv.length, icon: Icons.movie_rounded, color: kBlue)),
+            SliverPadding(padding: const EdgeInsets.only(bottom: 12), sliver: SliverGrid(gridDelegate: posterGrid, delegate: SliverChildBuilderDelegate((c, i) => _gridPoster(mv[i], false), childCount: mv.length))),
+          ],
+          if (ms.isNotEmpty) ...[
+            SliverPersistentHeader(pinned: true, delegate: _StickySection(title: L.t('home_series'), count: ms.length, icon: Icons.live_tv_rounded, color: const Color(0xFF34D399))),
+            SliverPadding(padding: const EdgeInsets.only(bottom: 12), sliver: SliverGrid(gridDelegate: posterGrid, delegate: SliverChildBuilderDelegate((c, i) => _gridPoster(ms[i], true), childCount: ms.length))),
+          ],
+          if (ml.isNotEmpty) ...[
+            SliverPersistentHeader(pinned: true, delegate: _StickySection(title: L.t('type_live'), count: ml.length, icon: Icons.sensors_rounded, color: const Color(0xFFF87171))),
+            SliverGrid(gridDelegate: tileGrid, delegate: SliverChildBuilderDelegate((c, i) => _liveTile(ml, i), childCount: ml.length)),
+          ],
+          const SliverToBoxAdapter(child: SizedBox(height: 24)),
+        ]);
+      });
+
+  // Live-Kachel: Sender-Logo (mittig) + Name — wie IBOs „Live TV"-Block.
+  Widget _liveTile(List<Item> live, int i) {
+    final ch = live[i];
+    return _HoverScale(
+      child: TvFocus(
+        radius: 10,
+        onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(
+              title: ch.name, url: Xtream.liveUrl(ch.id), channels: live, index: i, urlFor: (c) => Xtream.liveUrl(c.id)))),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: Container(
+                width: double.infinity, color: kPanel2, padding: const EdgeInsets.all(10),
+                child: ch.icon.isEmpty
+                    ? const Icon(Icons.tv_rounded, color: kMuted, size: 30)
+                    : Image.network(ch.icon, fit: BoxFit.contain, errorBuilder: (_, _, _) => const Icon(Icons.tv_rounded, color: kMuted, size: 30)),
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(ch.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kText, fontSize: 12, fontWeight: FontWeight.w600)),
+        ]),
+      ),
+    );
+  }
+
   Widget _liveList(List<Item> items) => ListView.builder(
         padding: const EdgeInsets.symmetric(vertical: 4),
         itemCount: items.length,
-        itemBuilder: (c, i) {
-          final ch = items[i];
-          return TvFocus(
-            radius: 10,
-            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(
-                  title: ch.name, url: Xtream.liveUrl(ch.id),
-                  channels: items, index: i, urlFor: (c) => Xtream.liveUrl(c.id),
-                ))),
-            child: Container(
-              margin: const EdgeInsets.symmetric(vertical: 3),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(color: kPanel.withValues(alpha: .4), borderRadius: BorderRadius.circular(10), border: Border.all(color: kLine)),
-              child: Row(children: [
-                Container(
-                  width: 42, height: 30, clipBehavior: Clip.antiAlias,
-                  decoration: BoxDecoration(color: kPanel2, borderRadius: BorderRadius.circular(6)),
-                  child: ch.icon.isEmpty
-                      ? const Icon(Icons.tv_rounded, size: 16, color: kMuted)
-                      : Image.network(ch.icon, fit: BoxFit.contain, errorBuilder: (_, _, _) => const Icon(Icons.tv_rounded, size: 16, color: kMuted)),
-                ),
-                const SizedBox(width: 12),
-                Expanded(child: Text(ch.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kText, fontSize: 14, fontWeight: FontWeight.w600))),
-                const Icon(Icons.play_circle_outline_rounded, color: kMuted, size: 20),
-              ]),
-            ),
-          );
-        },
+        itemBuilder: (c, i) => _liveRow(items, i),
       );
 
-  Widget _poster(Item it) => TvFocus(
+  Widget _liveRow(List<Item> items, int i) {
+    final ch = items[i];
+    return TvFocus(
+      radius: 10,
+      onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(
+            title: ch.name, url: Xtream.liveUrl(ch.id),
+            channels: items, index: i, urlFor: (c) => Xtream.liveUrl(c.id),
+          ))),
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 3),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(color: kPanel.withValues(alpha: .4), borderRadius: BorderRadius.circular(10), border: Border.all(color: kLine)),
+        child: Row(children: [
+          Container(
+            width: 42, height: 30, clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(color: kPanel2, borderRadius: BorderRadius.circular(6)),
+            child: ch.icon.isEmpty
+                ? const Icon(Icons.tv_rounded, size: 16, color: kMuted)
+                : Image.network(ch.icon, fit: BoxFit.contain, errorBuilder: (_, _, _) => const Icon(Icons.tv_rounded, size: 16, color: kMuted)),
+          ),
+          const SizedBox(width: 12),
+          Expanded(child: Text(ch.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kText, fontSize: 14, fontWeight: FontWeight.w600))),
+          const Icon(Icons.play_circle_outline_rounded, color: kMuted, size: 20),
+        ]),
+      ),
+    );
+  }
+
+  Widget _gridPoster(Item it, bool isSeries) => _HoverScale(
+    child: TvFocus(
         radius: 10,
-        onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => tab == 1 ? SeriesDetailScreen(item: it) : MovieDetailScreen(item: it))),
+        onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => isSeries ? SeriesDetailScreen(item: it) : MovieDetailScreen(item: it))),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Expanded(
             child: ClipRRect(
@@ -1529,7 +1717,44 @@ class _SearchScreenState extends State<SearchScreen> {
           const SizedBox(height: 6),
           Text(it.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kText, fontSize: 12, fontWeight: FontWeight.w600)),
         ]),
-      );
+      ),
+    );
+}
+
+// Favoriten-Button (Stern) — sitzt direkt bei den Aktions-Buttons im Detail,
+// nicht in der Fenster-Ecke. kind: 'vod' | 'series'.
+class _FavButton extends StatefulWidget {
+  final Item item;
+  final String kind;
+  const _FavButton({required this.item, required this.kind});
+  @override
+  State<_FavButton> createState() => _FavButtonState();
+}
+
+class _FavButtonState extends State<_FavButton> {
+  @override
+  Widget build(BuildContext context) {
+    final fav = FavStore.isFav(widget.item.id, widget.kind);
+    final c = fav ? Colors.amber : kText;
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () async { await FavStore.toggle(widget.item, widget.kind); if (mounted) setState(() {}); },
+        child: Container(
+          height: 44,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: fav ? Colors.amber.withValues(alpha: .12) : Colors.transparent, border: Border.all(color: fav ? Colors.amber : kLine, width: 1.5)),
+          child: Row(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.center, children: [
+            Icon(fav ? Icons.star_rounded : Icons.star_border_rounded, size: 20, color: c),
+            const SizedBox(width: 8),
+            Transform.translate(offset: const Offset(0, -2), child: Text(L.t('favorites'), style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: c, height: 1.0, leadingDistribution: TextLeadingDistribution.even))),
+          ]),
+        ),
+      ),
+    );
+  }
 }
 
 // ============================ FILM-DETAIL ============================
@@ -1570,31 +1795,40 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
     ];
     return Scaffold(
       appBar: _subBar(context, widget.item.name),
-      body: Container(
-        decoration: _bgDeco(),
-        child: loading
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          cover.isEmpty
+              ? Container(decoration: _bgDeco())
+              : Image.network(cover, fit: BoxFit.cover, errorBuilder: (_, _, _) => Container(decoration: _bgDeco())),
+          if (cover.isNotEmpty)
+            BackdropFilter(filter: ImageFilter.blur(sigmaX: 32, sigmaY: 32), child: Container(color: kBg.withValues(alpha: .82))),
+          loading
             ? _loading()
-            : Padding(
-                padding: const EdgeInsets.all(20),
-                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            : Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1080),
+                child: Padding(
+                padding: const EdgeInsets.all(28),
+                child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
                   ClipRRect(
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(16),
                     child: SizedBox(
-                      width: 200, height: 300,
+                      width: 250, height: 375,
                       child: cover.isEmpty
-                          ? Container(color: kPanel2, child: const Icon(Icons.movie_rounded, color: kMuted, size: 48))
-                          : Image.network(cover, fit: BoxFit.cover, errorBuilder: (_, _, _) => Container(color: kPanel2, child: const Icon(Icons.movie_rounded, color: kMuted, size: 48))),
+                          ? Container(color: kPanel2, child: const Icon(Icons.movie_rounded, color: kMuted, size: 54))
+                          : Image.network(cover, fit: BoxFit.cover, errorBuilder: (_, _, _) => Container(color: kPanel2, child: const Icon(Icons.movie_rounded, color: kMuted, size: 54))),
                     ),
                   ),
-                  const SizedBox(width: 24),
+                  const SizedBox(width: 34),
                   Expanded(
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(widget.item.name, style: const TextStyle(color: kText, fontSize: 24, fontWeight: FontWeight.w800, fontFamily: 'serif')),
+                    child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(widget.item.name, style: const TextStyle(color: kText, fontSize: 26, fontWeight: FontWeight.w800, fontFamily: 'serif')),
                       const SizedBox(height: 10),
                       if (meta.isNotEmpty) Text(meta.join('   ·   '), style: const TextStyle(color: kBlue, fontSize: 13, fontWeight: FontWeight.w600)),
-                      const SizedBox(height: 16),
-                      Expanded(child: SingleChildScrollView(child: Text(plot.isEmpty ? L.t('no_desc') : plot, style: const TextStyle(color: kMuted, fontSize: 14, height: 1.5)))),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 18),
+                      ConstrainedBox(constraints: const BoxConstraints(maxHeight: 320), child: SingleChildScrollView(child: Text(plot.isEmpty ? L.t('no_desc') : plot, style: const TextStyle(color: kMuted, fontSize: 15, height: 1.55)))),
+                      const SizedBox(height: 20),
                       ValueListenableBuilder<int>(
                         valueListenable: Downloads.notifier,
                         builder: (c, _, _) {
@@ -1602,20 +1836,31 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                           final url = Xtream.vodUrl(widget.item.id, ext);
                           final local = Downloads.localPath(key); // offline, wenn vorhanden
                           return Row(children: [
-                            SizedBox(
-                              width: 200, height: 52,
-                              child: FilledButton.icon(
+                            Material(
+                              color: kBlue,
+                              borderRadius: BorderRadius.circular(12),
+                              child: InkWell(
                                 autofocus: kTvRing,
-                                style: FilledButton.styleFrom(backgroundColor: kBlue, foregroundColor: kBg, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                                onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(title: widget.item.name, url: local ?? url, resume: true, poster: cover))),
-                                icon: const Icon(Icons.play_arrow_rounded),
-                                label: Text(L.t('play'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                                borderRadius: BorderRadius.circular(12),
+                                onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(title: widget.item.name, url: local ?? url, resume: true, poster: cover))),
+                                child: Container(
+                                  height: 52,
+                                  alignment: Alignment.center,
+                                  padding: const EdgeInsets.symmetric(horizontal: 26),
+                                  child: Row(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.center, children: [
+                                    const Icon(Icons.play_arrow_rounded, size: 20, color: kBg),
+                                    const SizedBox(width: 8),
+                                    Transform.translate(offset: const Offset(0, -2), child: Text(L.t('play'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: kBg, height: 1.0, leadingDistribution: TextLeadingDistribution.even))),
+                                  ]),
+                                ),
                               ),
                             ),
                             if (kDesktop) ...[
                               const SizedBox(width: 12),
                               dlControl(context, key: key, title: widget.item.name, url: url, ext: ext, poster: cover),
                             ],
+                            const SizedBox(width: 12),
+                            _FavButton(item: widget.item, kind: 'vod'),
                           ]);
                         },
                       ),
@@ -1623,6 +1868,9 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                   ),
                 ]),
               ),
+              ),
+              ),
+        ],
       ),
     );
   }
@@ -1714,24 +1962,28 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
                           ),
                         ),
                       const SizedBox(height: 10),
-                      if (kDesktop && eps.isNotEmpty) ...[
-                        SizedBox(
-                          height: 44,
-                          child: OutlinedButton.icon(
-                            style: OutlinedButton.styleFrom(side: const BorderSide(color: kBlue), foregroundColor: kBlue),
-                            onPressed: () {
-                              for (final list in det!.seasons.values) {
-                                for (final e in list) {
-                                  Downloads.add(key: 'ep_${e.id}', title: '${widget.item.name} – ${e.title}', url: Xtream.seriesEpUrl(e.id, e.ext), ext: e.ext, poster: cover);
+                      Row(children: [
+                        if (kDesktop && eps.isNotEmpty) ...[
+                          SizedBox(
+                            height: 44,
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(side: const BorderSide(color: kBlue), foregroundColor: kBlue),
+                              onPressed: () {
+                                for (final list in det!.seasons.values) {
+                                  for (final e in list) {
+                                    Downloads.add(key: 'ep_${e.id}', title: '${widget.item.name} – ${e.title}', url: Xtream.seriesEpUrl(e.id, e.ext), ext: e.ext, poster: cover);
+                                  }
                                 }
-                              }
-                            },
-                            icon: const Icon(Icons.download_rounded, size: 20),
-                            label: Text(L.t('download_all'), style: const TextStyle(fontWeight: FontWeight.w700)),
+                              },
+                              icon: const Icon(Icons.download_rounded, size: 20),
+                              label: Text(L.t('download_all'), style: const TextStyle(fontWeight: FontWeight.w700)),
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 10),
-                      ],
+                          const SizedBox(width: 12),
+                        ],
+                        _FavButton(item: widget.item, kind: 'series'),
+                      ]),
+                      const SizedBox(height: 10),
                       Expanded(
                         child: eps.isEmpty
                             ? _empty(L.t('no_eps'))
@@ -1747,7 +1999,11 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
                                     return TvFocus(
                                       radius: 10,
                                       autofocus: i == 0,
-                                      onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(title: e.title, url: local ?? url, resume: true, poster: cover))),
+                                      onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(
+                                            title: e.title, url: local ?? url, resume: true, poster: cover,
+                                            queue: [for (final ep in eps) Playable(ep.title, Downloads.localPath('ep_${ep.id}') ?? Xtream.seriesEpUrl(ep.id, ep.ext))],
+                                            queueIndex: i,
+                                          ))),
                                       child: Container(
                                         margin: const EdgeInsets.symmetric(vertical: 4),
                                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -1850,6 +2106,10 @@ class _CatchupProgramsScreenState extends State<CatchupProgramsScreen> {
   }
 }
 
+// Ein Eintrag der Vor/Zurück-Warteschlange (z. B. Serien-Episoden). Anders als
+// „channels" (Live) bleibt hier der Seekbar/Fortsetzen-Modus erhalten.
+class Playable { final String title, url; const Playable(this.title, this.url); }
+
 // ============================ PLAYER (Platzhalter – VLC im nativen Build) ============================
 class PlayerScreen extends StatefulWidget {
   final String title, url;
@@ -1858,7 +2118,9 @@ class PlayerScreen extends StatefulWidget {
   final String Function(Item)? urlFor;
   final bool resume; // Filme/Serien: Position merken & fortsetzen
   final String poster; // fuer „Weiterschauen"
-  const PlayerScreen({super.key, required this.title, required this.url, this.channels, this.index = 0, this.urlFor, this.resume = false, this.poster = ''});
+  final List<Playable>? queue; // gesetzt = Vor/Nächster-Track (Episoden), KEIN Live
+  final int queueIndex;
+  const PlayerScreen({super.key, required this.title, required this.url, this.channels, this.index = 0, this.urlFor, this.resume = false, this.poster = '', this.queue, this.queueIndex = 0});
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
 }
@@ -1869,25 +2131,50 @@ class _PlayerScreenState extends State<PlayerScreen> {
   late String title = widget.title;
   late String _url = widget.url;
   late int idx = widget.index;
+  late int _qi = widget.queueIndex; // Position in der Episoden-Warteschlange
   String epg = '';
   StreamSubscription? _durSub;
+  StreamSubscription? _completedSub; // am Folgen-Ende automatisch die nächste starten
   StreamSubscription? _errSub;
   bool _seeked = false;
   double _brightness = 0.5;
   BoxFit _fit = BoxFit.contain;
   bool _errShown = false; // verhindert gestapelte Fehler-Dialoge
-  double _vol = 100; // Lautstärke 0..100 (Regler rechts)
+  static double _savedVol = 100; // zuletzt gewählte Lautstärke – bleibt über Player-Wechsel erhalten
+  double _vol = _savedVol; // Lautstärke 0..100 (Regler rechts)
   bool _fs = false;  // Fenster-Vollbild (Desktop)
   String _clock = '';
   Timer? _clockTimer;
+  bool _ui = true;   // Steuerung + Overlays (Lautstärke/Zurück) sichtbar?
+  Timer? _uiTimer;   // blendet nach 1,5 s Ruhe alles aus
+  Offset? _tapPos;   // letzte Tipp-Position (für Doppeltipp-Spulen links/rechts)
+  String? _fitMsg;   // kurze Format-Anzeige beim Umschalten (Anpassen/Zoom/Strecken)
+  Timer? _fitTimer;
+  Timer? _saveTimer; // speichert die Position periodisch (auch wenn das Fenster hart geschlossen wird)
+
+  // Alles einblenden und die 1,5-s-Uhr neu bei 0 starten. Jede Maus-/Tasten-
+  // aktion ruft das auf -> bewegt man die Maus, zählt es wieder von vorne.
+  void _revealUi() {
+    _uiTimer?.cancel();
+    if (!_ui && mounted) setState(() => _ui = true);
+    _uiTimer = Timer(const Duration(milliseconds: 1500), () {
+      if (mounted) setState(() => _ui = false);
+    });
+  }
 
   static String _fmtClock() { final n = DateTime.now(); return '${n.hour.toString().padLeft(2, '0')}:${n.minute.toString().padLeft(2, '0')}'; }
 
-  void _cycleFit() => setState(() {
-        _fit = _fit == BoxFit.contain ? BoxFit.cover : (_fit == BoxFit.cover ? BoxFit.fill : BoxFit.contain);
-      });
+  void _cycleFit() {
+    setState(() {
+      _fit = _fit == BoxFit.contain ? BoxFit.cover : (_fit == BoxFit.cover ? BoxFit.fill : BoxFit.contain);
+      _fitMsg = _fit == BoxFit.contain ? L.t('fit_fit') : (_fit == BoxFit.cover ? L.t('fit_zoom') : L.t('fit_stretch'));
+    });
+    _revealUi();
+    _fitTimer?.cancel();
+    _fitTimer = Timer(const Duration(milliseconds: 1300), () { if (mounted) setState(() => _fitMsg = null); });
+  }
 
-  void _setVol(double v) { _vol = v.clamp(0, 100); player.setVolume(_vol); setState(() {}); }
+  void _setVol(double v) { _vol = v.clamp(0, 100); _savedVol = _vol; player.setVolume(_vol); setState(() {}); }
 
   Future<void> _toggleFs() async {
     _fs = !_fs;
@@ -1902,12 +2189,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
   // Manche Anbieter/CDNs (v. a. VOD) lehnen den Standard-Player-User-Agent ab.
   // Ein gängiger IPTV-UA wird überall akzeptiert.
   static const Map<String, String> _kHdr = {'User-Agent': 'IBOPlayer'};
-  void _openUrl() => player.open(Media(_url, httpHeaders: _kHdr));
+  void _openUrl() { player.open(Media(_url, httpHeaders: _kHdr)); player.setVolume(_vol); }
 
   @override
   void initState() {
     super.initState();
     _openUrl();
+    _revealUi(); // sichtbar starten, dann nach 1,5 s ausblenden
     _clock = _fmtClock();
     _clockTimer = Timer.periodic(const Duration(seconds: 20), (_) { if (mounted) setState(() => _clock = _fmtClock()); });
     _applySubScale();
@@ -1921,28 +2209,72 @@ class _PlayerScreenState extends State<PlayerScreen> {
         barrierColor: Colors.black54,
         builder: (dctx) => AlertDialog(
           backgroundColor: kPanel,
-          title: Text(L.t('player_err_title'), style: const TextStyle(color: kText, fontWeight: FontWeight.w700)),
-          content: Text(L.t('player_err'), style: const TextStyle(color: kMuted)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          actionsAlignment: MainAxisAlignment.center,
+          actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          title: Text(L.t('player_err_title'), textAlign: TextAlign.center, style: const TextStyle(color: kText, fontWeight: FontWeight.w700)),
+          content: Text(L.t('player_err'), textAlign: TextAlign.center, style: const TextStyle(color: kMuted)),
           actions: [
-            TextButton(onPressed: () { Navigator.pop(dctx); Navigator.of(context).maybePop(); }, child: Text(L.t('go_back'))),
-            FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: kBlue, foregroundColor: kBg),
-              onPressed: () { Navigator.pop(dctx); _openUrl(); },
-              child: Text(L.t('retry')),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                InkWell(
+                  borderRadius: BorderRadius.circular(22),
+                  onTap: () { Navigator.pop(dctx); Navigator.of(context).maybePop(); },
+                  child: Container(
+                    alignment: Alignment.center,
+                    padding: const EdgeInsets.fromLTRB(22, 9, 22, 13),
+                    child: Text(L.t('go_back'), textAlign: TextAlign.center, style: const TextStyle(color: kBlue, fontWeight: FontWeight.w700, height: 1.0, leadingDistribution: TextLeadingDistribution.even)),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Material(
+                  color: kBlue,
+                  borderRadius: BorderRadius.circular(22),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(22),
+                    onTap: () { Navigator.pop(dctx); _openUrl(); },
+                    child: Container(
+                      alignment: Alignment.center,
+                      padding: const EdgeInsets.fromLTRB(28, 9, 28, 13),
+                      child: Text(L.t('retry'), textAlign: TextAlign.center, style: const TextStyle(color: kBg, fontWeight: FontWeight.w700, height: 1.0, leadingDistribution: TextLeadingDistribution.even)),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
       ).then((_) { _errShown = false; });
     });
+    // Serie: am Ende einer Folge automatisch die nächste starten (Binge-Watch, kein Zurück nötig).
+    _completedSub = player.stream.completed.listen((done) {
+      if (done && widget.queue != null && _qi < widget.queue!.length - 1) _queueJump(1);
+    });
     if (widget.resume) {
       _durSub = player.stream.duration.listen((d) {
         if (!_seeked && d > Duration.zero) {
           _seeked = true;
-          final s = ResumeStore.get(widget.url);
+          final s = ResumeStore.get(_url);
           if (s > 5) player.seek(Duration(seconds: s));
         }
       });
+      // Fortschritt ALLE 5 s sichern -> „Weiterschauen" funktioniert auch, wenn man
+      // das Fenster einfach schließt (dann läuft dispose() nicht zuverlässig).
+      _saveTimer = Timer.periodic(const Duration(seconds: 5), (_) => _saveProgress());
     }
+  }
+
+  // Aktuelle Position sichern (Resume-Sprung + „Weiterschauen"-Reihe). Idempotent,
+  // wird periodisch UND beim Verlassen aufgerufen.
+  void _saveProgress() {
+    if (!widget.resume) return;
+    final pos = player.state.position.inSeconds;
+    final dur = player.state.duration.inSeconds;
+    if (pos <= 0) return;
+    ResumeStore.set(_url, pos, dur);
+    ContinueStore.record(url: _url, title: title, poster: widget.poster, pos: pos, dur: dur);
   }
 
   Future<void> _loadEpg() async {
@@ -1955,15 +2287,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   void dispose() {
-    if (widget.resume) {
-      final pos = player.state.position.inSeconds;
-      final dur = player.state.duration.inSeconds;
-      ResumeStore.set(widget.url, pos, dur);
-      ContinueStore.record(url: widget.url, title: widget.title, poster: widget.poster, pos: pos, dur: dur);
-    }
+    _saveProgress();
+    _saveTimer?.cancel();
     _durSub?.cancel();
+    _completedSub?.cancel();
     _errSub?.cancel();
     _clockTimer?.cancel();
+    _uiTimer?.cancel();
+    _fitTimer?.cancel();
     if (_fs) { try { windowManager.setFullScreen(false); } catch (_) {} }
     try { ScreenBrightness().resetApplicationScreenBrightness(); } catch (_) {}
     player.dispose();
@@ -1984,6 +2315,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
     setState(() { idx = n; title = ch[n].name; });
     _openUrl();
     _loadEpg();
+  }
+
+  // Vor/Nächste Episode (Serien-Warteschlange). Merkt die aktuelle Position zum
+  // Fortsetzen, springt zum Nachbar-Titel und lässt den Resume-Listener neu greifen.
+  void _queueJump(int delta) {
+    final q = widget.queue;
+    if (q == null) return;
+    final n = _qi + delta;
+    if (n < 0 || n >= q.length) return;
+    if (widget.resume) {
+      final pos = player.state.position.inSeconds, dur = player.state.duration.inSeconds;
+      ResumeStore.set(_url, pos, dur);
+      ContinueStore.record(url: _url, title: title, poster: widget.poster, pos: pos, dur: dur);
+    }
+    _qi = n; _url = q[n].url; _seeked = false;
+    setState(() { title = q[n].title; });
+    _openUrl();
+    _revealUi();
   }
 
   void _tracks(bool audio) {
@@ -2025,9 +2374,98 @@ class _PlayerScreenState extends State<PlayerScreen> {
     return id;
   }
 
+  // Eigene Steuer-Ebene: gleiches IBO-Layout wie media_kit (dessen fertige
+  // Einzel-Widgets), ABER ohne dessen Einzeltipp-zum-Ein-/Ausblenden.
+  // Sichtbarkeit steuert allein unser _ui-Timer (Mausbewegung/Taste).
+  Widget _mkControls(BuildContext context, MaterialVideoControlsThemeData c, bool live) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // Hintergrund: Doppeltipp = spulen (VOD); am Handy vertikal wischen =
+        // Helligkeit (links) / Lautstärke (rechts). KEIN Einzeltipp -> kein Toggle.
+        Positioned.fill(
+          child: LayoutBuilder(
+            builder: (ctx, cons) => GestureDetector(
+              onDoubleTapDown: (d) => _tapPos = d.localPosition,
+              onDoubleTap: live
+                  ? null
+                  : () {
+                      final x = _tapPos?.dx ?? cons.maxWidth / 2;
+                      _seekBy(x < cons.maxWidth / 2 ? -10 : 10);
+                    },
+              onVerticalDragUpdate: kDesktop
+                  ? null
+                  : (d) {
+                      if (d.localPosition.dx < cons.maxWidth / 2) {
+                        _brightness = (_brightness - d.delta.dy / 500).clamp(0.0, 1.0).toDouble();
+                        try { ScreenBrightness().setApplicationScreenBrightness(_brightness); } catch (_) {}
+                      } else {
+                        _setVol(_vol - d.delta.dy / 500 * 100);
+                      }
+                    },
+              child: const ColoredBox(color: Color(0x00000000)),
+            ),
+          ),
+        ),
+        // Ladeanzeige – unabhängig von _ui immer sichtbar.
+        StreamBuilder<bool>(
+          stream: player.stream.buffering,
+          initialData: player.state.buffering,
+          builder: (_, s) => (s.data ?? false)
+              ? const Center(child: CircularProgressIndicator(color: Colors.white))
+              : const SizedBox.shrink(),
+        ),
+        // Buttons + Seekbar – blenden mit _ui ein/aus (200 ms), wie Lautstärke/Zurück.
+        IgnorePointer(
+          ignoring: !_ui,
+          child: AnimatedOpacity(
+            opacity: _ui ? 1 : 0,
+            duration: const Duration(milliseconds: 200),
+            child: Padding(
+              padding: c.padding ?? EdgeInsets.zero,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Container(
+                    height: c.buttonBarHeight,
+                    margin: c.topButtonBarMargin,
+                    child: Row(children: c.topButtonBar),
+                  ),
+                  Expanded(
+                    child: Center(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: c.primaryButtonBar,
+                      ),
+                    ),
+                  ),
+                  Stack(
+                    alignment: Alignment.bottomCenter,
+                    children: [
+                      if (!live) MaterialSeekBar(), // Live: kein Ladebalken/Seekbar
+                      Container(
+                        height: c.buttonBarHeight,
+                        margin: c.bottomButtonBarMargin,
+                        child: Row(children: c.bottomButtonBar),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final live = widget.channels != null;
+    final hasQueue = widget.queue != null && widget.queue!.length > 1;
     final safe = MediaQuery.of(context).padding;
     double ins(double v, double min) => v < min ? min : v;
     // Desktop = Maus -> alles größer/dicker als am Handy.
@@ -2044,11 +2482,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
       onBrightnessChanged: (v) { try { ScreenBrightness().setApplicationScreenBrightness(v.clamp(0.0, 1.0)); } catch (_) {} },
       onBrightnessReset: () { try { ScreenBrightness().resetApplicationScreenBrightness(); } catch (_) {} },
       // Lautstärke-Geste (rechts): media_kit ruft nur diesen Callback – ohne ihn passiert nichts.
-      initialVolume: (player.state.volume / 100).clamp(0.0, 1.0),
-      onVolumeChanged: (v) { _vol = (v * 100).clamp(0.0, 100.0); player.setVolume(_vol); },
-      // Steuerung verschwindet NICHT von allein (media_kit kann den Timer bei Button-Taps
-      // nicht zurücksetzen). Sie bleibt offen, bis man aufs Bild tippt (dann aus). So verschwindet
-      // beim Einstellen/Testen nichts mehr; Wischgesten bleiben aktiv.
+      initialVolume: (_vol / 100).clamp(0.0, 1.0),
+      onVolumeChanged: (v) { _vol = (v * 100).clamp(0.0, 100.0); _savedVol = _vol; player.setVolume(_vol); },
+      // media_kit soll NICHT selbst aus-/einblenden (sein Hover-Timer greift im
+      // Vollbild nicht). Das Ein-/Ausblenden macht komplett unser _ui-Timer über
+      // den controls-Schalter oben. days:1 = solange sichtbar, wie _ui an ist.
       controlsHoverDuration: const Duration(days: 1),
       visibleOnMount: true,
       padding: EdgeInsets.only(
@@ -2079,16 +2517,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
             ]
           : [
               const Spacer(flex: 2),
+              if (hasQueue) MaterialCustomButton(onPressed: () => _queueJump(-1), iconSize: bigSec, icon: const Icon(Icons.skip_previous_rounded, color: Colors.white)),
+              if (hasQueue) const Spacer(),
               MaterialCustomButton(onPressed: () => _seekBy(-10), iconSize: bigSec, icon: const Icon(Icons.replay_10_rounded, color: Colors.white)),
               const Spacer(),
               MaterialPlayOrPauseButton(iconSize: bigPlay),
               const Spacer(),
               MaterialCustomButton(onPressed: () => _seekBy(10), iconSize: bigSec, icon: const Icon(Icons.forward_10_rounded, color: Colors.white)),
+              if (hasQueue) const Spacer(),
+              if (hasQueue) MaterialCustomButton(onPressed: () => _queueJump(1), iconSize: bigSec, icon: const Icon(Icons.skip_next_rounded, color: Colors.white)),
               const Spacer(flex: 2),
             ],
       // Untere Leiste: große Restzeit-Anzeige links; Audio/Untertitel/Format/Vollbild rechts.
       bottomButtonBar: [
-        MaterialPositionIndicator(style: TextStyle(color: Colors.white, fontSize: kDesktop ? 16 : 13, fontWeight: FontWeight.w700)),
+        if (!live) MaterialPositionIndicator(style: TextStyle(color: Colors.white, fontSize: kDesktop ? 16 : 13, fontWeight: FontWeight.w700)),
         const Spacer(),
         MaterialCustomButton(onPressed: () => _tracks(true), iconSize: bs, icon: const Icon(Icons.audiotrack_rounded, color: Colors.white)),
         MaterialCustomButton(onPressed: () => _tracks(false), iconSize: bs, icon: const Icon(Icons.closed_caption_rounded, color: Colors.white)),
@@ -2113,32 +2555,50 @@ class _PlayerScreenState extends State<PlayerScreen> {
         autofocus: true,
         onKeyEvent: (node, event) {
           if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
+          _revealUi(); // jede Taste holt die Steuerung zurück + startet die 1,5 s neu
           final k = event.logicalKey;
           // ESC / Zurück -> Player verlassen (Rettungsanker am Desktop).
           if (k == LogicalKeyboardKey.escape || k == LogicalKeyboardKey.browserBack) { Navigator.of(context).maybePop(); return KeyEventResult.handled; }
           if (live && (k == LogicalKeyboardKey.arrowUp || k == LogicalKeyboardKey.channelUp)) { _zap(-1); return KeyEventResult.handled; }
           if (live && (k == LogicalKeyboardKey.arrowDown || k == LogicalKeyboardKey.channelDown)) { _zap(1); return KeyEventResult.handled; }
+          if (!live && k == LogicalKeyboardKey.arrowUp) { _setVol(_vol + 5); return KeyEventResult.handled; }
+          if (!live && k == LogicalKeyboardKey.arrowDown) { _setVol(_vol - 5); return KeyEventResult.handled; }
+          if (!live && hasQueue && (k == LogicalKeyboardKey.pageUp || k == LogicalKeyboardKey.mediaTrackPrevious)) { _queueJump(-1); return KeyEventResult.handled; }
+          if (!live && hasQueue && (k == LogicalKeyboardKey.pageDown || k == LogicalKeyboardKey.mediaTrackNext)) { _queueJump(1); return KeyEventResult.handled; }
           if (!live && k == LogicalKeyboardKey.arrowLeft) { _seekBy(-10); return KeyEventResult.handled; }
           if (!live && k == LogicalKeyboardKey.arrowRight) { _seekBy(10); return KeyEventResult.handled; }
           if (k == LogicalKeyboardKey.mediaPlayPause || k == LogicalKeyboardKey.space ||
               k == LogicalKeyboardKey.select || k == LogicalKeyboardKey.enter) { player.playOrPause(); return KeyEventResult.handled; }
           return KeyEventResult.ignored;
         },
-        child: Stack(children: [
+        child: Listener(
+          // Jede Mausbewegung/-berührung zeigt die Steuerung und startet die 1,5 s neu.
+          // translucent = Kinder (Steuerung/Regler) bekommen ihre Klicks trotzdem.
+          behavior: HitTestBehavior.translucent,
+          onPointerHover: (_) => _revealUi(),   // Maus bewegen (ohne Taste)
+          onPointerMove: (_) => _revealUi(),    // Ziehen (Taste gedrückt, z. B. Regler)
+          onPointerDown: (_) => _revealUi(),    // Klick/Tap
+          onPointerSignal: (_) => _revealUi(),  // Mausrad
+          child: Stack(children: [
           Positioned.fill(
             child: MaterialVideoControlsTheme(
               normal: controls,
               fullscreen: controls,
-              // Überall UNSERE Steuerung (nicht die Desktop-Standard-Steuerung von
-              // media_kit) -> gleiche Buttons auf Windows/Handy/TV.
-              child: Video(controller: controller, fit: _fit, controls: MaterialVideoControls),
+              // UNSERE eigene Steuer-Ebene (kein media_kit-Tap-Toggle). Ein-/
+              // Ausblenden macht allein der _ui-Timer -> Klick toggelt NICHT mehr.
+              child: Video(controller: controller, fit: _fit, controls: (state) => _mkControls(context, controls, live)),
             ),
           ),
           // Immer sichtbarer Zurück-Button oben links (unabhängig von der Steuerleiste,
           // damit man am Desktop/TV nie „festhängt").
           Positioned(
             top: ins(safe.top, 8), left: ins(safe.left, 8),
-            child: Material(
+            child: IgnorePointer(
+              ignoring: !_ui,
+              child: AnimatedOpacity(
+                opacity: _ui ? 1 : 0,
+                duration: const Duration(milliseconds: 200),
+                child: Material(
               color: Colors.transparent,
               child: InkWell(
                 borderRadius: BorderRadius.circular(22),
@@ -2150,12 +2610,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 ),
               ),
             ),
+              ),
+            ),
           ),
           // Lautstärke: vertikaler Regler mittig rechts. Außerhalb der media_kit-Steuerung,
           // damit die Zieh-Geste sauber greift; immer erreichbar (oft benutzt).
           Positioned(
             right: ins(safe.right, 10), top: 0, bottom: 0,
-            child: Center(
+            child: IgnorePointer(
+              ignoring: !_ui,
+              child: AnimatedOpacity(
+                opacity: _ui ? 1 : 0,
+                duration: const Duration(milliseconds: 200),
+                child: Center(
               child: Container(
                 padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
                 decoration: BoxDecoration(color: Colors.black.withValues(alpha: .38), borderRadius: BorderRadius.circular(26)),
@@ -2185,8 +2652,26 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 ]),
               ),
             ),
+              ),
+            ),
           ),
+          // Kurze Format-Anzeige (Anpassen/Zoom/Strecken) beim Umschalten.
+          if (_fitMsg != null)
+            Center(
+              child: IgnorePointer(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+                  decoration: BoxDecoration(color: Colors.black.withValues(alpha: .62), borderRadius: BorderRadius.circular(12)),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    const Icon(Icons.aspect_ratio_rounded, color: Colors.white, size: 22),
+                    const SizedBox(width: 10),
+                    Text(_fitMsg!, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
+                  ]),
+                ),
+              ),
+            ),
         ]),
+        ),
       ),
     );
   }
@@ -2414,12 +2899,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget _favs() => _panel(Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
         Text(L.t('favorites'), style: const TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w700)),
         const SizedBox(height: 4),
-        Text('${FavStore.items().length} ${L.t('favs_saved')}', style: const TextStyle(color: kMuted, fontSize: 12.5)),
+        Text('${FavStore.count()} ${L.t('favs_saved')}', style: const TextStyle(color: kMuted, fontSize: 12.5)),
         const SizedBox(height: 14),
         OutlinedButton.icon(
           style: OutlinedButton.styleFrom(side: const BorderSide(color: kLine)),
           onPressed: () async {
-            for (final it in FavStore.items()) { await FavStore.toggle(it); }
+            await FavStore.clearAll();
             if (mounted) setState(() {});
           },
           icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFF2A0A0), size: 18),
@@ -2587,14 +3072,17 @@ class _AccountScreenState extends State<AccountScreen> {
         child: SafeArea(
           child: loading
             ? _loading()
-            : Padding(
-                padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
-                child: Column(children: [
+            : Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1080),
+                child: Padding(
+                padding: const EdgeInsets.all(28),
+                child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
                   _idPanel(context, compact: true), // MAC + Geräteschlüssel — kompakt
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 14),
                   SizedBox(
                     width: double.infinity,
-                    height: 44,
+                    height: 48,
                     child: OutlinedButton.icon(
                       style: OutlinedButton.styleFrom(side: const BorderSide(color: kBlue), foregroundColor: kBlue),
                       onPressed: _reload,
@@ -2602,11 +3090,11 @@ class _AccountScreenState extends State<AccountScreen> {
                       label: Text(L.t('reload_playlist'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  Expanded(
-                    child: GridView.builder(
-                      physics: const NeverScrollableScrollPhysics(), // passt in 2 Reihen -> kein Scrollen
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: cols, mainAxisSpacing: 10, crossAxisSpacing: 10, mainAxisExtent: 56),
+                  const SizedBox(height: 16),
+                  GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: cols, mainAxisSpacing: 10, crossAxisSpacing: 10, mainAxisExtent: 60),
                       itemCount: data.length,
                       itemBuilder: (c, idx) {
                         final ok = data[idx][3] as bool;
@@ -2623,8 +3111,9 @@ class _AccountScreenState extends State<AccountScreen> {
                         );
                       },
                     ),
-                  ),
                 ]),
+              ),
+              ),
               ),
         ),
       ),

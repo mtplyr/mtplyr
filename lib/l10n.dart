@@ -74,6 +74,10 @@ class L {
     'no_fav': ['Noch keine Favoriten', 'No favorites yet', 'Henüz favori yok', 'لا مفضلة بعد', 'Aucun favori pour l\'instant', 'Ancora nessun preferito', 'Δεν υπάρχουν αγαπημένα ακόμη'],
     'no_hits': ['Keine Treffer', 'No results', 'Sonuç yok', 'لا نتائج', 'Aucun résultat', 'Nessun risultato', 'Κανένα αποτέλεσμα'],
     'no_content': ['Keine Inhalte', 'No content', 'İçerik yok', 'لا محتوى', 'Aucun contenu', 'Nessun contenuto', 'Χωρίς περιεχόμενο'],
+    'all_cat': ['Alle', 'All', 'Tümü', 'الكل', 'Tout', 'Tutti', 'Όλα'],
+    'fit_fit': ['Anpassen', 'Fit', 'Sığdır', 'ملاءمة', 'Ajuster', 'Adatta', 'Προσαρμογή'],
+    'fit_zoom': ['Zoom', 'Zoom', 'Yakınlaştır', 'تكبير', 'Zoom', 'Zoom', 'Ζουμ'],
+    'fit_stretch': ['Strecken', 'Stretch', 'Uzat', 'تمديد', 'Étirer', 'Allunga', 'Τέντωμα'],
     // Suche
     'search_title': ['Suche', 'Search', 'Arama', 'بحث', 'Recherche', 'Cerca', 'Αναζήτηση'],
     'search_hint': ['Film oder Serie suchen…', 'Search movie or series…', 'Film veya dizi ara…', 'ابحث عن فيلم أو مسلسل…', 'Rechercher un film ou une série…', 'Cerca film o serie…', 'Αναζήτηση ταινίας ή σειράς…'],

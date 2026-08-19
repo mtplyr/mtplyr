@@ -701,9 +701,10 @@ class ContinueStore {
   }
 }
 
-/// Lokale Favoriten-Sender (persistiert).
+/// Lokale Favoriten (Live-Sender, Filme, Serien) — pro `kind` getrennt, persistiert.
+/// kind: 'live' | 'vod' | 'series'.
 class FavStore {
-  static const _k = 'fav_live';
+  static const _k = 'fav_v2';
   static List<Map<String, dynamic>> _cache = [];
 
   static Future<void> load() async {
@@ -711,18 +712,48 @@ class FavStore {
     final s = p.getString(_k);
     if (s != null) {
       try { _cache = (jsonDecode(s) as List).map((e) => Map<String, dynamic>.from(e)).toList(); } catch (_) {}
+      return;
+    }
+    // Migration: alte reine Live-Favoriten (Key 'fav_live') übernehmen.
+    final old = p.getString('fav_live');
+    if (old != null) {
+      try {
+        _cache = (jsonDecode(old) as List).map((e) {
+          final m = Map<String, dynamic>.from(e);
+          m['kind'] ??= 'live';
+          return m;
+        }).toList();
+        await _save();
+      } catch (_) {}
     }
   }
 
-  static bool isFav(String id) => _cache.any((e) => e['id'] == id);
-  static List<Item> items() => _cache.map((e) => Item('${e['id']}', '${e['name']}', '${e['icon'] ?? ''}', num: e['num'] ?? 0)).toList();
+  static String _kindOf(Map e) => (e['kind'] ?? 'live').toString();
 
-  static Future<void> toggle(Item it) async {
-    if (isFav(it.id)) {
-      _cache.removeWhere((e) => e['id'] == it.id);
+  static bool isFav(String id, String kind) => _cache.any((e) => e['id'] == id && _kindOf(e) == kind);
+
+  static List<Item> items(String kind) => _cache
+      .where((e) => _kindOf(e) == kind)
+      .map((e) => Item('${e['id']}', '${e['name']}', '${e['icon'] ?? ''}', num: e['num'] ?? 0))
+      .toList();
+
+  static int count() => _cache.length;
+
+  static Future<void> toggle(Item it, String kind) async {
+    if (isFav(it.id, kind)) {
+      _cache.removeWhere((e) => e['id'] == it.id && _kindOf(e) == kind);
     } else {
-      _cache.add({'id': it.id, 'name': it.name, 'icon': it.icon, 'num': it.num});
+      _cache.add({'id': it.id, 'name': it.name, 'icon': it.icon, 'num': it.num, 'kind': kind});
     }
+    await _save();
+  }
+
+  static Future<void> clearAll() async {
+    _cache = [];
+    await _save();
+  }
+
+  static Future<void> _save() async {
     final p = await SharedPreferences.getInstance();
     await p.setString(_k, jsonEncode(_cache));
   }

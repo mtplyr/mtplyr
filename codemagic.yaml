@@ -1,20 +1,84 @@
-# Codemagic-Build fuer die Vela iOS-App (Ad-Hoc .ipa zum Sideloaden).
+# Codemagic-Builds fuer die Vela iOS-App.
 #
-# EINMALIGE EINRICHTUNG in Codemagic (Web-UI):
+# >>> PRIMAER: Workflow "ios-testflight" — baut eine signierte .ipa und laedt
+#     sie zu TestFlight hoch. Die App kommt dann ueber die Apple-"TestFlight"-App
+#     aufs iPhone (KEIN Kabel/Sideloadly noetig). Das ist der Weg, den du willst.
+#
+# EINMALIGE EINRICHTUNG in Codemagic (Web-UI) — gilt fuer TestFlight & Ad-Hoc:
 #  1. App verbinden (dieses GitHub-Repo).
-#  2. Teams / Integrations -> App Store Connect: API-Key hinterlegen
-#     (in Apple: Users and Access -> Integrations -> App Store Connect API -> Key erzeugen).
-#     Den Integrations-Namen unten bei `app_store_connect` eintragen (hier: "vela_asc").
-#  3. iPhone-UDID im Apple Developer Portal registrieren
-#     (Devices -> +, UDID: 00008150-0016428234B9401C) ODER Codemagic legt es beim
-#     Ad-Hoc-Build automatisch an, wenn die API-Rolle das darf.
-#  4. Bundle-ID: com.vela.velaplayer (muss als Identifier im Apple-Portal existieren;
-#     app-store-connect fetch-signing-files ... --create legt ihn sonst an).
+#  2. Apple API-Key erzeugen: Apple Developer -> Users and Access -> Integrations
+#     -> App Store Connect API -> Key erstellen (Rolle "App Manager" oder "Admin").
+#     In Codemagic unter Teams -> Integrations -> App Store Connect hinterlegen und
+#     den Integrations-Namen "vela_asc" vergeben (genau so heisst er unten).
+#  3. In App Store Connect eine App anlegen: Apps -> + -> Neue App, Plattform iOS,
+#     Bundle-ID com.vela.velaplayer, Name "Vela", SKU frei (z.B. vela1).
+#     (Die Bundle-ID muss im Developer-Portal existieren; fetch-signing-files
+#     --create legt sie sonst automatisch an.)
 #
-# Danach: Build starten -> fertige .ipa unter Artifacts herunterladen ->
-# mit Sideloadly/3uTools aufs iPhone.
+# Danach: in Codemagic "Start new build" -> Workflow "Vela iOS (TestFlight)".
+# Nach ~15 Min ist der Build in App Store Connect -> TestFlight. Auf dem iPhone
+# die "TestFlight"-App aus dem App Store laden, mit deiner Apple-ID anmelden ->
+# Vela erscheint zum Testen.
+#
+# Die anderen Workflows (unsigniert / Ad-Hoc) sind Sideload-Fallbacks und laufen
+# nur manuell (kein Auto-Trigger).
 
 workflows:
+
+  # ==================================================================
+  # TESTFLIGHT — der saubere Weg aufs iPhone. Baut eine signierte
+  # App-Store-.ipa und laedt sie automatisch zu App Store Connect ->
+  # TestFlight hoch. Start ueber "Start new build" in Codemagic (manuell).
+  # Braucht: Apple-Developer-Mitgliedschaft + Integration "vela_asc"
+  # + App in App Store Connect mit Bundle-ID com.vela.velaplayer.
+  # ==================================================================
+  ios-testflight:
+    name: Vela iOS (TestFlight)
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.vela.velaplayer
+      vars:
+        BUNDLE_ID: "com.vela.velaplayer"
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    integrations:
+      app_store_connect: vela_asc
+    scripts:
+      - name: Code-Signing vorbereiten (App Store)
+        script: |
+          keychain initialize
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --create
+          keychain add-certificates
+          xcode-project use-profiles
+      - name: Flutter-Pakete
+        script: flutter pub get
+      - name: Pods installieren
+        script: find . -name "Podfile" -execdir pod install \;
+      - name: .ipa bauen (App Store, Build-Nr. automatisch hochzaehlen)
+        script: |
+          flutter build ipa --release \
+            --build-number=$BUILD_NUMBER \
+            --export-options-plist=$HOME/export_options.plist
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - flutter_drive.log
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+      email:
+        recipients:
+          - okan_2oo8@hotmail.de
+        notify:
+          success: true
+          failure: true
 
   # Unsignierte .ipa – braucht KEIN Apple-Konto. Mit Sideloadly (eigene Apple-ID)
   # signieren + aufs iPhone installieren. Für sofortigen Test, solange die
@@ -23,12 +87,6 @@ workflows:
     name: Vela iOS (unsigniert, fuer Sideloadly)
     instance_type: mac_mini_m2
     max_build_duration: 60
-    triggering:
-      events:
-        - push
-      branch_patterns:
-        - pattern: master
-          include: true
     environment:
       flutter: stable
       xcode: latest
