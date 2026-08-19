@@ -37,9 +37,6 @@ workflows:
     instance_type: mac_mini_m2
     max_build_duration: 60
     environment:
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: com.vela.velaplayer
       vars:
         BUNDLE_ID: "com.vela.velaplayer"
       flutter: stable
@@ -47,6 +44,9 @@ workflows:
       cocoapods: default
     integrations:
       app_store_connect: vela_asc
+    # KEIN "ios_signing"-Block: der wuerde beim Start ein FERTIGES Profil
+    # erwarten und sonst sofort abbrechen ("No matching profiles found").
+    # Der Schritt unten legt Zertifikat + Profil per --create selbst an.
     scripts:
       - name: Code-Signing vorbereiten (App Store)
         script: |
