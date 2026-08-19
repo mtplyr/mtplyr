@@ -51,18 +51,16 @@ workflows:
       - name: Code-Signing vorbereiten (App Store)
         script: |
           keychain initialize
-          # Fehler war: "Cannot create resource without certificate private key".
-          # -> privaten Schluessel selbst erzeugen und damit das Distribution-
-          #    Zertifikat anlegen (neue CLI-Syntax "certificates create").
-          openssl genrsa -out /tmp/dist_key.pem 2048
+          # Zertifikat + privaten Schluessel von Codemagic selbst erzeugen lassen
+          # (KEIN eigener openssl-Key). Das ergibt ein macOS-kompatibles .p12,
+          # das der Keychain-Import lesen kann. Der openssl-Key gab zuvor
+          # "SecKeychainItemImport: Unable to decode the provided data".
           app-store-connect certificates create \
             --type IOS_DISTRIBUTION \
-            --certificate-key=@file:/tmp/dist_key.pem \
             --save
-          # Provisioning-Profil holen/erstellen (mit demselben Schluessel)
+          # Provisioning-Profil holen/erstellen
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
-            --certificate-key=@file:/tmp/dist_key.pem \
             --create
           keychain add-certificates
           xcode-project use-profiles
