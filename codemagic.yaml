@@ -51,6 +51,12 @@ workflows:
       - name: Code-Signing vorbereiten (App Store)
         script: |
           keychain initialize
+          # Distribution-Zertifikat MIT privatem Schluessel beschaffen:
+          # neu erstellen (Codemagic behaelt den Key). Falls das Apple-Limit
+          # erreicht ist, stattdessen vorhandene Zertifikate laden.
+          app-store-connect create-certificate --type IOS_DISTRIBUTION --save \
+            || app-store-connect list-certificates --type IOS_DISTRIBUTION --save
+          # Provisioning-Profil holen/erstellen
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
             --create
