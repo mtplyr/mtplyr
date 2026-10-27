@@ -50,17 +50,19 @@ workflows:
     scripts:
       - name: Code-Signing vorbereiten (App Store)
         script: |
+          set -e
           keychain initialize
-          # Zertifikat + privaten Schluessel von Codemagic selbst erzeugen lassen
-          # (KEIN eigener openssl-Key). Das ergibt ein macOS-kompatibles .p12,
-          # das der Keychain-Import lesen kann. Der openssl-Key gab zuvor
-          # "SecKeychainItemImport: Unable to decode the provided data".
-          app-store-connect certificates create \
-            --type IOS_DISTRIBUTION \
-            --save
-          # Provisioning-Profil holen/erstellen
+          # EIGENER privater Schluessel, aber nur als PEM-KEY (KEIN openssl-p12!).
+          # Das vermeidet den "SecKeychainItemImport: Unable to decode"-Fehler,
+          # denn das .p12 baut danach Codemagic (macOS-kompatibel), nicht openssl.
+          openssl genrsa -out /tmp/dist_key.pem 2048
+          # Distribution-Zertifikat UND App-Store-Profil in EINEM Schritt mit
+          # unserem Key anlegen -> ergibt ein zueinander passendes Cert+Key-p12.
+          # (Vorher getrennt: certificates create + fetch-signing-files -> Cert und
+          #  Profil passten nicht zusammen -> Archiv fand kein gueltiges Zertifikat.)
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
+            --certificate-key @file:/tmp/dist_key.pem \
             --create
           keychain add-certificates
           xcode-project use-profiles
