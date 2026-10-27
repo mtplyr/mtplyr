@@ -80,8 +80,11 @@ workflows:
           #    Vorpruefung ("No development certificates"), die bei einem reinen
           #    Distribution-Setup faelschlich zuschlaegt.
           flutter build ios --release --no-codesign --build-number=$BUILD_NUMBER
-          # 2) Codemagic archiviert + signiert mit dem geholten App-Store-Profil
-          #    (manuelles Signing via xcode-project use-profiles).
+          # 2) WICHTIG: flutter build hat gerade die project.pbxproj neu geschrieben
+          #    ("Upgrading project.pbxproj") und damit unser Signing wieder entfernt.
+          #    Darum JETZT nochmal das Profil setzen, direkt vor dem Archivieren.
+          xcode-project use-profiles
+          # 3) Archivieren + signieren mit dem App-Store-Profil.
           xcode-project build-ipa \
             --workspace ios/Runner.xcworkspace \
             --scheme Runner
