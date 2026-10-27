@@ -72,9 +72,16 @@ workflows:
         script: find . -name "Podfile" -execdir pod install \;
       - name: .ipa bauen (App Store, Build-Nr. automatisch hochzaehlen)
         script: |
-          flutter build ipa --release \
-            --build-number=$BUILD_NUMBER \
-            --export-options-plist=$HOME/export_options.plist
+          set -e
+          # 1) Flutter OHNE Signing bauen -> umgeht Flutters kaputte Dev-Zertifikat-
+          #    Vorpruefung ("No development certificates"), die bei einem reinen
+          #    Distribution-Setup faelschlich zuschlaegt.
+          flutter build ios --release --no-codesign --build-number=$BUILD_NUMBER
+          # 2) Codemagic archiviert + signiert mit dem geholten App-Store-Profil
+          #    (manuelles Signing via xcode-project use-profiles).
+          xcode-project build-ipa \
+            --workspace ios/Runner.xcworkspace \
+            --scheme Runner
     artifacts:
       - build/ios/ipa/*.ipa
       - flutter_drive.log
