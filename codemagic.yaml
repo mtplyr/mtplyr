@@ -56,10 +56,13 @@ workflows:
           # Das vermeidet den "SecKeychainItemImport: Unable to decode"-Fehler,
           # denn das .p12 baut danach Codemagic (macOS-kompatibel), nicht openssl.
           openssl genrsa -out /tmp/dist_key.pem 2048
-          # Distribution-Zertifikat UND App-Store-Profil in EINEM Schritt mit
-          # unserem Key anlegen -> ergibt ein zueinander passendes Cert+Key-p12.
-          # (Vorher getrennt: certificates create + fetch-signing-files -> Cert und
-          #  Profil passten nicht zusammen -> Archiv fand kein gueltiges Zertifikat.)
+          # 1) Distribution-Zertifikat MIT unserem Key ERSTELLEN (nicht nur suchen!).
+          #    Scheitert das mit "limit", muss im Apple-Portal ein altes widerrufen werden.
+          app-store-connect certificates create \
+            --type IOS_DISTRIBUTION \
+            --certificate-key @file:/tmp/dist_key.pem \
+            --save
+          # 2) App-Store-Profil holen/erstellen -> passt zum eben erstellten Cert (gleicher Key).
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
             --certificate-key @file:/tmp/dist_key.pem \
