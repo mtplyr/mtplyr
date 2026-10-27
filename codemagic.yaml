@@ -56,8 +56,15 @@ workflows:
           # Das vermeidet den "SecKeychainItemImport: Unable to decode"-Fehler,
           # denn das .p12 baut danach Codemagic (macOS-kompatibel), nicht openssl.
           openssl genrsa -out /tmp/dist_key.pem 2048
+          # 0) Apple erlaubt nur EIN iOS-Distribution-Zertifikat. Ein altes existiert
+          #    (woanders erstellt -> privater Key hier nicht verfuegbar). Darum alle
+          #    vorhandenen Distribution-Zertifikate WIDERRUFEN, damit wir ein frisches
+          #    mit UNSEREM Key erstellen koennen. (Keine Produktiv-App nutzt sie.)
+          app-store-connect certificates list --type IOS_DISTRIBUTION --json > /tmp/certs.json || echo "[]" > /tmp/certs.json
+          for CID in $(python3 -c "import json;print('\n'.join(c.get('id','') for c in json.load(open('/tmp/certs.json'))))" 2>/dev/null); do
+            [ -n "$CID" ] && echo "Widerrufe altes Distribution-Zertifikat $CID" && app-store-connect certificates delete "$CID" || true
+          done
           # 1) Distribution-Zertifikat MIT unserem Key ERSTELLEN (nicht nur suchen!).
-          #    Scheitert das mit "limit", muss im Apple-Portal ein altes widerrufen werden.
           app-store-connect certificates create \
             --type IOS_DISTRIBUTION \
             --certificate-key @file:/tmp/dist_key.pem \
