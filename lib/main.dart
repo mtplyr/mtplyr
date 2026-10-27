@@ -8,6 +8,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:file_picker/file_picker.dart';
 import 'xtream.dart';
 import 'l10n.dart';
 import 'brand.dart';
@@ -25,17 +26,70 @@ void main() async {
   if (kDesktop) { try { await windowManager.ensureInitialized(); } catch (_) {} }
   SystemChrome.setPreferredOrientations(const [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
   await Session.load();
-  await FavStore.load();
   await Prefs.load();
   await ResumeStore.load();
-  await ContinueStore.load();
+  await PlaylistStore.load();
+  // Migration: aktuell aktive Einzel-Playlist in die Liste übernehmen, falls noch leer.
+  if (PlaylistStore.items().isEmpty && (Session.account != null || Session.hasStoredM3u)) {
+    if (Session.hasStoredM3u) {
+      await PlaylistStore.upsert(name: _plName(Session.m3uUrl), mode: 'm3u', url: Session.m3uUrl);
+    } else if (Session.account != null) {
+      final a = Session.account!;
+      await PlaylistStore.upsert(name: _plName(a.host), mode: 'xtream', host: a.host, user: a.user, pass: a.pass);
+    }
+  }
+  // Konsistenz: „aktive" Playlist an die TATSÄCHLICH gemerkte Quelle angleichen
+  // (sonst kann Settings eine andere anzeigen als die, die läuft).
+  if (Session.account != null || Session.hasStoredM3u) {
+    final loadedId = Session.mode == 'm3u'
+        ? 'm|${Session.m3uUrl}'
+        : (Session.account != null ? 'x|${Session.account!.host}|${Session.account!.user}' : '');
+    if (loadedId.isNotEmpty) {
+      for (final p in PlaylistStore.items()) {
+        if (p.identity == loadedId) { if (PlaylistStore.activeId != p.id) await PlaylistStore.setActive(p.id); break; }
+      }
+    }
+  }
+  await loadScopedStores(); // „Weiterschauen" + Favoriten der AKTIVEN Playlist laden
   await License.load();
   if (kDesktop) { await Downloads.load(); } // Offline-Downloads (Desktop)
   unawaited(Session.registerDevice()); // MAC beim Hub anmelden (nicht blockierend)
   runApp(const BrandApp());
 }
 
+// „Weiterschauen" + Favoriten auf die aktive Playlist umstellen und neu laden.
+Future<void> loadScopedStores() async {
+  ContinueStore.scope = PlaylistStore.activeId;
+  FavStore.scope = PlaylistStore.activeId;
+  WatchedStore.scope = PlaylistStore.activeId;
+  await ContinueStore.load();
+  await FavStore.load();
+  await WatchedStore.load();
+}
+
+// Anzeige-Name einer Playlist aus Host/URL ableiten (z. B. „d67.xyz").
+String _plName(String hostOrUrl) {
+  try { final h = Uri.parse(hostOrUrl).host; if (h.isNotEmpty) return h; } catch (_) {}
+  return hostOrUrl.isEmpty ? 'Playlist' : hostOrUrl;
+}
+
+// get.php?...m3u_plus-Link -> Xtream-Zugangsdaten (Host+Port, User, Pass) für vollen Xtream-Zugriff.
+Account? xtreamFromGetUrl(String url) {
+  try {
+    final u = Uri.parse(url.trim());
+    final user = u.queryParameters['username'];
+    final pass = u.queryParameters['password'];
+    if (user == null || user.isEmpty || pass == null || pass.isEmpty) return null;
+    final host = '${u.scheme}://${u.host}${u.hasPort ? ':${u.port}' : ''}';
+    return Account(host, user, pass);
+  } catch (_) { return null; }
+}
+
 // Farben + Markenname kommen aus brand.dart (Vela = Blau, Nina = Grün).
+
+final GlobalKey<NavigatorState> rootNavKey = GlobalKey<NavigatorState>();
+
+class _BackIntent extends Intent { const _BackIntent(); }
 
 class BrandApp extends StatelessWidget {
   const BrandApp({super.key});
@@ -47,8 +101,102 @@ class BrandApp extends StatelessWidget {
         key: ValueKey(Prefs.lang),
         title: kBrandName,
         debugShowCheckedModeBanner: false,
+        navigatorKey: rootNavKey,
         theme: ThemeData(useMaterial3: true, brightness: Brightness.dark, scaffoldBackgroundColor: kBg, fontFamily: 'Roboto'),
-        home: !Session.isReady ? const ActivationScreen() : const HomeGate(),
+        // ESC = zurück in der ganzen App. Im Player fängt dessen eigener ESC-Handler die Taste
+        // vorher ab (Vollbild verlassen), hier greift sie nur, wenn sonst niemand sie behandelt.
+        builder: (context, child) => Shortcuts(
+          shortcuts: const {SingleActivator(LogicalKeyboardKey.escape): _BackIntent()},
+          child: Actions(
+            actions: {_BackIntent: CallbackAction<_BackIntent>(onInvoke: (_) { rootNavKey.currentState?.maybePop(); return null; })},
+            child: child!,
+          ),
+        ),
+        home: !Prefs.langChosen
+            ? const LanguageScreen()
+            : ((Session.account != null || Session.hasStoredM3u) ? const HomeGate() : const ActivationScreen()),
+      ),
+    );
+  }
+}
+
+// Ersteinrichtung: Sprache wählen (nur beim allerersten Start). System-Sprache ist vorausgewählt.
+class LanguageScreen extends StatefulWidget {
+  const LanguageScreen({super.key});
+  @override
+  State<LanguageScreen> createState() => _LanguageScreenState();
+}
+
+class _LanguageScreenState extends State<LanguageScreen> {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        decoration: _bgDeco(),
+        child: SafeArea(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 460),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                child: Column(children: [
+                  // Kopf — bleibt fest
+                  const SizedBox(height: 4),
+                  const BrandLogo(size: 44),
+                  const SizedBox(height: 18),
+                  Text(L.t('choose_language'), style: const TextStyle(color: kText, fontSize: 22, fontWeight: FontWeight.w700, fontFamily: 'serif')),
+                  const SizedBox(height: 6),
+                  Text(L.t('choose_language_sub'), textAlign: TextAlign.center, style: const TextStyle(color: kMuted, fontSize: 13)),
+                  const SizedBox(height: 18),
+                  // Liste — nur sie scrollt
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: Column(children: [
+                        for (final l in kLangs)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: TvFocus(
+                              radius: 12,
+                              onTap: () async { await L.set(l[0]); if (mounted) setState(() {}); },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
+                                decoration: BoxDecoration(
+                                  color: Prefs.lang == l[0] ? kBlue.withValues(alpha: .16) : kPanel.withValues(alpha: .5),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: Prefs.lang == l[0] ? kBlue : kLine, width: Prefs.lang == l[0] ? 1.5 : 1),
+                                ),
+                                child: Row(children: [
+                                  Text(l[1], style: TextStyle(color: kText, fontSize: 16, fontWeight: Prefs.lang == l[0] ? FontWeight.w700 : FontWeight.w500)),
+                                  const Spacer(),
+                                  if (Prefs.lang == l[0]) const Icon(Icons.check_circle_rounded, color: kBlue, size: 22),
+                                ]),
+                              ),
+                            ),
+                          ),
+                      ]),
+                    ),
+                  ),
+                  // „Weiter" — bleibt fest
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: FilledButton(
+                      style: FilledButton.styleFrom(backgroundColor: kBlue, foregroundColor: kBg, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11))),
+                      onPressed: () async {
+                        await Prefs.markLangChosen();
+                        if (!mounted) return;
+                        final next = (Session.account != null || Session.hasStoredM3u) ? const HomeGate() : const ActivationScreen();
+                        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => next));
+                      },
+                      child: Text(L.t('continue_btn'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                ]),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -184,11 +332,15 @@ class _HomeGateState extends State<HomeGate> {
   bool needsActivation = false;
 
   Future<void> _check() async {
+    // Gemerkte M3U-Quelle JETZT laden (nach UI-Start, mit Spinner) — nicht mehr in main().
+    if (Session.hasStoredM3u && Session.m3u.isEmpty) { await Session.restoreActive(); }
     await License.startTrial();
     await License.syncFromServer(); // Trial/paid an MAC gebunden (Server = Wahrheit)
     // velaplayer.com ist die Wahrheit: Playlist dort gelöscht -> App verliert sie hier.
     // 'error' (offline) lässt den lokalen Stand unangetastet, damit die App offline läuft.
-    if (Session.isReady) {
+    // ABER im Test-Modus ist die LOKALE Playlist-Liste die Wahrheit -> Server nicht drüberbügeln
+    // lassen (sonst überschreibt/löscht er lokal hinzugefügte Playlists -> Rauswurf ins Setup).
+    if (!License.freeForTesting && Session.isReady) {
       final plState = await Session.syncFromActivation();
       if (plState == 'none') {
         await Session.clear();
@@ -196,19 +348,27 @@ class _HomeGateState extends State<HomeGate> {
         return;
       }
     }
-    bool exp = License.simExpiredPlaylist;
-    if (!exp && Session.account != null) {
-      try {
-        final i = await Xtream.userInfo(Session.account!);
-        if (i != null) {
-          final status = '${i['status'] ?? ''}'.toLowerCase();
-          final expTs = int.tryParse('${i['exp_date'] ?? ''}');
-          exp = (status.isNotEmpty && status != 'active') ||
-              (expTs != null && expTs > 0 && DateTime.fromMillisecondsSinceEpoch(expTs * 1000).isBefore(DateTime.now()));
-        }
-      } catch (_) {}
-    }
-    if (mounted) setState(() { playlistExpired = exp; loading = false; });
+    // Oberfläche SOFORT zeigen. Die Konto-Gültigkeit (ein API-Aufruf zum Anbieter) prüfen wir
+    // NICHT blockierend — sonst hängt der Start am lahmen Anbieter (z. B. d67 = 21 s Timeout).
+    if (mounted) setState(() { loading = false; });
+    _checkExpiryInBackground();
+    unawaited(Session.cleanupOldCaches()); // alte Playlist-Caches im Temp aufräumen (kein GB-Stau)
+  }
+
+  // Konto-Ablauf im Hintergrund prüfen. Ist der Anbieter nicht erreichbar -> NICHT als abgelaufen
+  // werten (sonst würde ein lahmer Server fälschlich die Playlist sperren).
+  Future<void> _checkExpiryInBackground() async {
+    if (License.simExpiredPlaylist) { if (mounted) setState(() => playlistExpired = true); return; }
+    if (Session.account == null) return;
+    try {
+      final i = await Xtream.userInfo(Session.account!);
+      if (i == null) return; // nicht erreichbar -> unangetastet lassen
+      final status = '${i['status'] ?? ''}'.toLowerCase();
+      final expTs = int.tryParse('${i['exp_date'] ?? ''}');
+      final exp = (status.isNotEmpty && status != 'active') ||
+          (expTs != null && expTs > 0 && DateTime.fromMillisecondsSinceEpoch(expTs * 1000).isBefore(DateTime.now()));
+      if (exp && mounted) setState(() => playlistExpired = true);
+    } catch (_) {}
   }
 
   @override
@@ -512,16 +672,92 @@ class ConnectScreen extends StatefulWidget {
 }
 
 class _ConnectScreenState extends State<ConnectScreen> {
-  final host = TextEditingController(text: 'http://d67.xyz:8080');
-  final user = TextEditingController(text: 'alex_v_ali_3');
-  final pass = TextEditingController(text: 'workfufufu');
+  final host = TextEditingController();
+  final user = TextEditingController();
+  final pass = TextEditingController();
   final m3u = TextEditingController();
+  final plName = TextEditingController(); // optionaler Anzeige-Name der Playlist
   String mode = 'xtream'; // 'xtream' oder 'm3u'
   bool busy = false;
   String? err;
 
   Future<void> _connect() async {
     setState(() { busy = true; err = null; });
+
+    // TEST-Freischaltung: Zugang direkt einrichten, NICHT über den Server-Aktivierungsstatus
+    // (der kann "expired" sein). get.php-Links werden in Xtream-Zugangsdaten geparst.
+    if (License.freeForTesting) {
+      Future<void> goHome() async {
+        await loadScopedStores(); // Verlauf/Favoriten auf die (neu aktive) Playlist umstellen
+        await License.startTrial();
+        if (!mounted) return;
+        Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const HomeGate()), (_) => false);
+      }
+      final customName = plName.text.trim();
+      if (mode == 'm3u') {
+        final url = m3u.text.trim();
+        if (!RegExp(r'^https?://', caseSensitive: false).hasMatch(url)) { setState(() { busy = false; err = L.t('m3u_url_err'); }); return; }
+        // WIE IBO: Ist der Link ein Xtream-get.php, ZUERST die schnelle player_api probieren
+        // (Kategorien einzeln, kein 34-MB-Download). Nur wenn die API verkrüppelt ist
+        // (z. B. d67 liefert dort nur user_info), die ganze M3U laden.
+        final a = xtreamFromGetUrl(url);
+        if (a != null && await Xtream.userInfo(a) != null) {
+          if (!mounted) return;
+          await Session.save(a);
+          int nCats = 0; try { nCats = (await Xtream.categoriesRaw('live')).length; } catch (_) {}
+          if (!mounted) return;
+          if (nCats > 0) { // API liefert echte Listen -> schnelles Xtream (wie IBO), kein Riesen-Download
+            final nm = customName.isNotEmpty ? customName : _plName(a.host);
+            unawaited(Session.pushXtreamToServer(a, name: nm));
+            await PlaylistStore.upsert(name: nm, mode: 'xtream', host: a.host, user: a.user, pass: a.pass);
+            await goHome();
+            return;
+          }
+          // player_api verkrüppelt -> weiter zur M3U (Session.save hat Xtream gesetzt, loadM3u korrigiert auf M3U)
+        }
+        // Fallback: ganze M3U laden (Anbieter ohne funktionierende API, oder reiner .m3u-Link ohne user/pass).
+        final okm = await Session.loadM3u(url);
+        if (!mounted) return;
+        if (okm) {
+          final nm = customName.isNotEmpty ? customName : _plName(url);
+          await PlaylistStore.upsert(name: nm, mode: 'm3u', url: url);
+          unawaited(Session.pushM3uToServer(url, name: nm)); // an Hub melden -> Admin/Reseller sieht die Playlist
+          await goHome();
+          return;
+        }
+        if (!mounted) return;
+        setState(() { busy = false; err = L.t('connect_err') + '  [xt: ${Xtream.diag} · m3u: ${Session.lastErr}]'; });
+        return;
+      } else {
+        final a = Account(host.text.trim(), user.text.trim(), pass.text.trim());
+        final info = await Xtream.userInfo(a);
+        if (!mounted) return;
+        if (info == null) { setState(() { busy = false; err = L.t('connect_err') + '  [${Xtream.diag}]'; }); return; }
+        final nm = customName.isNotEmpty ? customName : _plName(a.host);
+        await Session.save(a);
+        // Prüfen ob player_api WIRKLICH Listen liefert. Viele Anbieter sperren das (nur user_info)
+        // -> dann als M3U laden (get.php), sonst bleibt Live/Filme/Serien leer.
+        int nCats = 0; try { nCats = (await Xtream.categoriesRaw('live')).length; } catch (_) {}
+        if (!mounted) return;
+        if (nCats == 0) {
+          var h = a.host; if (!RegExp(r'^https?://', caseSensitive: false).hasMatch(h)) h = 'http://$h';
+          final m3uLink = '$h/get.php?username=${Uri.encodeQueryComponent(a.user)}&password=${Uri.encodeQueryComponent(a.pass)}&type=m3u_plus&output=ts';
+          if (await Session.loadM3u(m3uLink)) {
+            if (!mounted) return;
+            await PlaylistStore.upsert(name: nm, mode: 'm3u', url: m3uLink);
+            unawaited(Session.pushM3uToServer(m3uLink, name: nm));
+            await goHome();
+            return;
+          }
+          if (!mounted) return;
+        }
+        unawaited(Session.pushXtreamToServer(a, name: nm)); // an Hub melden -> Admin/Reseller sieht die Playlist
+        await PlaylistStore.upsert(name: nm, mode: 'xtream', host: a.host, user: a.user, pass: a.pass);
+        await goHome();
+        return;
+      }
+    }
+
     bool pushed;
     if (mode == 'm3u') {
       final url = m3u.text.trim();
@@ -544,14 +780,14 @@ class _ConnectScreenState extends State<ConnectScreen> {
     }
     if (!mounted) return;
     if (!pushed) {
-      setState(() { busy = false; err = L.t('server_save_err'); });
+      setState(() { busy = false; err = L.t('server_save_err') + '  [' + Session.lastErr + ']'; });
       return;
     }
     // App zieht die jetzt server-hinterlegte Playlist (identisch zum velaplayer.com-Weg).
     final ok = await Session.pullActivation();
     if (!mounted) return;
     if (!ok) {
-      setState(() { busy = false; err = L.t('server_save_err'); });
+      setState(() { busy = false; err = L.t('server_save_err') + '  [' + Session.lastErr + ']'; });
       return;
     }
     await License.startTrial();
@@ -588,6 +824,18 @@ class _ConnectScreenState extends State<ConnectScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      extendBodyBehindAppBar: true,
+      appBar: Navigator.of(context).canPop()
+          ? AppBar(
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              leading: IconButton(
+                icon: const Icon(Icons.arrow_back_rounded, color: kText),
+                onPressed: () => Navigator.of(context).maybePop(),
+                tooltip: L.t('go_back'),
+              ),
+            )
+          : null,
       body: Container(
         decoration: _bgDeco(),
         child: Center(
@@ -607,8 +855,9 @@ class _ConnectScreenState extends State<ConnectScreen> {
                     Text(L.t('connect_sub'), style: const TextStyle(color: kMuted, fontSize: 13)),
                     const SizedBox(height: 12),
                     _modeToggle(),
+                    _field(plName, L.t('name_optional')),
                     if (mode == 'xtream') ...[
-                      _field(host, L.t('connect_server')),
+                      _field(host, 'http://server.tld:8080'),
                       _field(user, L.t('username')),
                       _field(pass, L.t('password'), obscure: true),
                     ] else ...[
@@ -624,6 +873,14 @@ class _ConnectScreenState extends State<ConnectScreen> {
                         child: busy
                             ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: kBg))
                             : Text(L.t('connect_btn'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                      ),
+                    ),
+                    if (busy) Padding(
+                      padding: const EdgeInsets.only(top: 14),
+                      child: Text(
+                        L.t('loading_hint'),
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: kMuted, fontSize: 12.5, height: 1.4),
                       ),
                     ),
                   ]),
@@ -679,16 +936,24 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
-  // „Zuletzt hinzugefügt" – schlank über den Hub (Server sortiert + cacht).
+  // „Zuletzt hinzugefügt" – erst schlank über den Hub (Server sortiert/cacht).
+  // Liefert der Hub leer (Anbieter sperrt die Hub-IP, z. B. sltv), rechnet die App
+  // es SELBST direkt vom Anbieter (deine Heim-IP kommt durch) -> Lobby bleibt gefüllt.
   Future<void> _loadLatest() async {
     if (Session.mode != 'xtream') { return; }
-    final res = await Xtream.homeLatest(limit: 10);
-    if (mounted) {
-      setState(() {
-        _latestVod = res['movies'] ?? [];
-        _latestSeries = res['series'] ?? [];
-      });
+    var movies = <Item>[]; var series = <Item>[];
+    try { final res = await Xtream.homeLatest(limit: 10); movies = res['movies'] ?? []; series = res['series'] ?? []; } catch (_) {}
+    if (movies.isEmpty && series.isEmpty) {
+      try {
+        final vod = await Xtream.allVod();
+        final ser = await Xtream.allSeries();
+        vod.sort((a, b) => b.added.compareTo(a.added));
+        ser.sort((a, b) => b.added.compareTo(a.added));
+        movies = vod.take(10).toList();
+        series = ser.take(10).toList();
+      } catch (_) {}
     }
+    if (mounted) setState(() { _latestVod = movies; _latestSeries = series; });
   }
 
   void _open(BuildContext c, Widget s) => Navigator.of(c).push(MaterialPageRoute(builder: (_) => s)).then((_) { if (mounted) setState(() {}); });
@@ -781,10 +1046,19 @@ class _HomeScreenState extends State<HomeScreen> {
           separatorBuilder: (_, _) => const SizedBox(width: 10),
           itemBuilder: (ctx, i) {
             final it = items[i];
-            return TvFocus(
+            return Stack(children: [
+            TvFocus(
               radius: 12,
               onTap: () {
-                Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(title: it.title, url: it.url, resume: true, poster: it.poster))).then((_) { if (mounted) setState(() {}); });
+                // Staffel-Warteschlange wiederherstellen -> Weiter/Zurueck-Knopf auch aus „Weiterschauen".
+                List<Playable>? q;
+                int qi = 0;
+                if (it.queue != null && it.queue!.isNotEmpty) {
+                  q = [for (final e in it.queue!) Playable('${e['t']}', '${e['u']}')];
+                  qi = q.indexWhere((p) => p.url == it.url);
+                  if (qi < 0) qi = 0;
+                }
+                Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(title: it.title, url: it.url, resume: true, poster: it.poster, queue: q, queueIndex: qi))).then((_) { if (mounted) setState(() {}); });
               },
               child: Container(
                 width: 250,
@@ -813,7 +1087,35 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ]),
               ),
-            );
+            ),
+            // X oben rechts: aus „Weiterschauen" entfernen (mit Rückfrage).
+            Positioned(
+              top: 2, right: 2,
+              child: TvFocus(
+                radius: 13,
+                onTap: () async {
+                  final ok = await showDialog<bool>(
+                    context: context,
+                    builder: (_) => AlertDialog(
+                      backgroundColor: kPanel,
+                      title: Text(L.t('remove_continue_q'), style: const TextStyle(color: kText, fontSize: 16)),
+                      content: Text(it.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kMuted)),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(context, false), child: Text(L.t('cancel'))),
+                        TextButton(onPressed: () => Navigator.pop(context, true), child: Text(L.t('remove'), style: const TextStyle(color: kBlue, fontWeight: FontWeight.w700))),
+                      ],
+                    ),
+                  );
+                  if (ok == true) { await ContinueStore.remove(it.url); if (mounted) setState(() {}); }
+                },
+                child: Container(
+                  width: 26, height: 26,
+                  decoration: BoxDecoration(color: kBg.withValues(alpha: .82), shape: BoxShape.circle, border: Border.all(color: kLine)),
+                  child: const Icon(Icons.close_rounded, color: kText, size: 16),
+                ),
+              ),
+            ),
+            ]);
           },
         ),
       ),
@@ -979,14 +1281,21 @@ Widget dlControl(BuildContext context, {required String key, required String tit
     valueListenable: Downloads.notifier,
     builder: (c, _, _) {
       final d = Downloads.get(key);
-      final st = d?.status;
+      var st = d?.status;
+      if (st == 'done' && Downloads.localPath(key) == null) st = null; // Datei wurde geloescht -> wieder herunterladbar
       IconData icon; Color color = kBlue; VoidCallback? onTap; String label;
       if (st == 'done') { icon = Icons.download_done_rounded; color = kOk; onTap = null; label = L.t('dl_offline'); }
       else if (st == 'downloading') { icon = Icons.downloading_rounded; onTap = () => Downloads.remove(key); label = '${(d!.progress * 100).round()}%'; }
       else if (st == 'queued') { icon = Icons.schedule_rounded; onTap = () => Downloads.remove(key); label = '…'; }
-      else if (st == 'error') { icon = Icons.error_outline_rounded; color = const Color(0xFFF2A0A0); onTap = () => Downloads.add(key: key, title: title, url: url, ext: ext, poster: poster); label = L.t('retry'); }
+      else if (st == 'error') { icon = Icons.error_outline_rounded; color = const Color(0xFFF2A0A0); onTap = () => Downloads.remove(key); label = L.t('delete'); } // Klick entfernt den fehlgeschlagenen Download -> wieder normaler Pfeil
       else { icon = Icons.download_rounded; onTap = () => Downloads.add(key: key, title: title, url: url, ext: ext, poster: poster); label = L.t('download'); }
-      if (compact) return IconButton(tooltip: label, icon: Icon(icon, color: color, size: 22), onPressed: onTap);
+      if (compact) {
+        final showLabel = st == 'downloading' || st == 'queued'; // Prozent/… direkt neben dem Icon, ohne Hover
+        return Row(mainAxisSize: MainAxisSize.min, children: [
+          if (showLabel) Text(label, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w700)),
+          IconButton(tooltip: label, visualDensity: VisualDensity.compact, icon: Icon(icon, color: color, size: 22), onPressed: onTap),
+        ]);
+      }
       return Material(
         color: Colors.transparent,
         borderRadius: BorderRadius.circular(12),
@@ -1019,7 +1328,9 @@ class DownloadsScreen extends StatelessWidget {
       body: Container(
         decoration: _bgDeco(),
         child: SafeArea(
-          child: ValueListenableBuilder<int>(
+          child: Column(children: [
+          _dlFolderBar(context),
+          Expanded(child: ValueListenableBuilder<int>(
             valueListenable: Downloads.notifier,
             builder: (c, _, _) {
               final items = Downloads.all();
@@ -1060,11 +1371,39 @@ class DownloadsScreen extends StatelessWidget {
                 },
               );
             },
-          ),
+          )),
+          ]),
         ),
       ),
     );
   }
+
+  // Leiste oben: aktueller Download-Ordner + „Ändern" (Ordner-Dialog).
+  Widget _dlFolderBar(BuildContext context) => ValueListenableBuilder<int>(
+        valueListenable: Downloads.notifier,
+        builder: (c, _, _) => Container(
+          margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(color: kPanel.withValues(alpha: .5), borderRadius: BorderRadius.circular(12), border: Border.all(color: kLine)),
+          child: Row(children: [
+            const Icon(Icons.folder_rounded, color: kBlue, size: 20),
+            const SizedBox(width: 10),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+              Text(L.t('dl_folder'), style: const TextStyle(color: kMuted, fontSize: 11.5)),
+              Text(Downloads.dir().path, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kText, fontSize: 13.5, fontWeight: FontWeight.w600)),
+            ])),
+            const SizedBox(width: 10),
+            OutlinedButton(
+              style: OutlinedButton.styleFrom(side: const BorderSide(color: kBlue), foregroundColor: kBlue),
+              onPressed: () async {
+                final path = await FilePicker.getDirectoryPath(dialogTitle: L.t('dl_folder'));
+                if (path != null && path.isNotEmpty) { await Prefs.setDownloadDir(path); Downloads.notifier.value++; }
+              },
+              child: Text(L.t('change')),
+            ),
+          ]),
+        ),
+      );
 }
 
 // ============================ LIVE ============================
@@ -1084,6 +1423,58 @@ class _LiveScreenState extends State<LiveScreen> {
   String query = '';
   List<Item> get _filtered => query.isEmpty ? chans : chans.where((c) => c.name.toLowerCase().contains(query.toLowerCase())).toList();
 
+  // ---- Desktop-Vorschau (nur breites Fenster). Klick = Vorschau, Doppelklick/▶ = Vollbild. ----
+  Player? _pv;
+  VideoController? _pvC;
+  Item? _pvCh;
+  bool _inFull = false; // Player-Vollbild offen -> Vorschau zeigt Platzhalter (nur EIN Video am Controller)
+  void _ensurePv() {
+    if (_pv != null) return;
+    _pv = Player(configuration: PlayerConfiguration(bufferSize: Prefs.bufferBytes));
+    _pv!.setVolume(Prefs.volume); // sofort auf gemerkte Lautstärke -> kein 100%-Start
+    _pvC = VideoController(_pv!);
+  }
+  void _preview(Item ch) {
+    if (widget.catchup) { _openFull(_filtered, _filtered.indexOf(ch)); return; } // Replay hat keine Live-Vorschau
+    _ensurePv();
+    setState(() => _pvCh = ch);
+    _pv!.open(Media(Xtream.liveUrl(ch.id), httpHeaders: const {'User-Agent': 'IBOPlayer'}));
+    _pv!.setVolume(Prefs.volume); // zuletzt gewählte Lautstärke beibehalten
+  }
+  void _openFull(List<Item> items, int i, {bool full = false}) {
+    if (i < 0) return;
+    final ch = items[i];
+    if (widget.catchup) {
+      Navigator.of(context).push(MaterialPageRoute(builder: (_) => CatchupProgramsScreen(streamId: ch.id, name: ch.name)));
+      return;
+    }
+    if (kDesktop) {
+      // Desktop: den LAUFENDEN Vorschau-Player übernehmen -> gleicher Sender = KEIN Neuladen,
+      // und weiterhin nur EINE Verbindung zum Anbieter (max_connections=1).
+      _ensurePv();
+      if (_pvCh?.id != ch.id) { // nur bei anderem Sender neu öffnen
+        setState(() => _pvCh = ch);
+        _pv!.open(Media(Xtream.liveUrl(ch.id), httpHeaders: const {'User-Agent': 'IBOPlayer'}));
+        _pv!.setVolume(Prefs.volume);
+      }
+      setState(() => _inFull = true); // Vorschau-Video abhängen, solange der Player oben ist
+      Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(
+        title: ch.name, url: Xtream.liveUrl(ch.id), channels: items, index: i, urlFor: (c) => Xtream.liveUrl(c.id),
+        adoptPlayer: _pv, adoptController: _pvC, startFullscreen: full,
+        onIndexChanged: (n) { if (mounted) setState(() => _pvCh = items[n]); },
+      ))).then((_) { if (mounted) setState(() => _inFull = false); }); // zurück -> Vorschau wieder anzeigen
+    } else {
+      Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(
+          title: ch.name, url: Xtream.liveUrl(ch.id), channels: items, index: i, urlFor: (c) => Xtream.liveUrl(c.id))));
+    }
+  }
+
+  @override
+  void dispose() {
+    _pv?.dispose();
+    super.dispose();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -1094,11 +1485,26 @@ class _LiveScreenState extends State<LiveScreen> {
     try {
       final c = await Xtream.categories('live');
       if (!mounted) return;
+      if (c.isEmpty) { // keine Live-Kategorien -> Grund sichtbar machen statt stumm leer
+        setState(() { loadingCats = false; error = 'Keine Live-Kategorien  [${Xtream.diag}]'; });
+        return;
+      }
       setState(() { cats = [Category('__fav__', '★ ${L.t('favorites')}'), ...c]; loadingCats = false; });
       _selectCat(cats.length > 1 ? 1 : 0);
+      _loadCounts(); // Anzahl je Kategorie (wie IBO)
     } catch (e) {
-      if (mounted) setState(() { loadingCats = false; error = L.t('err_load'); });
+      if (mounted) setState(() { loadingCats = false; error = L.t('err_load') + '  [${Xtream.diag}]'; });
     }
+  }
+
+  Map<String, int> _counts = {};
+  Future<void> _loadCounts() async {
+    try { final m = await Xtream.categoryCounts('live'); if (mounted) setState(() => _counts = m); } catch (_) {}
+  }
+  String? _catCount(Category c) {
+    if (c.id == '__fav__') return null;
+    final n = _counts[c.id];
+    return n != null ? '$n' : null;
   }
 
   Future<void> _selectCat(int i) async {
@@ -1119,6 +1525,8 @@ class _LiveScreenState extends State<LiveScreen> {
   @override
   Widget build(BuildContext context) {
     final narrow = _narrow(context);
+    // Vorschau nur bei breitem Desktop-Fenster (genug Platz) und nicht im Replay-Modus.
+    final wide = kDesktop && !narrow && MediaQuery.of(context).size.width > 1050 && !widget.catchup;
     return Scaffold(
       appBar: _subBar(context, widget.catchup ? L.t('replay_pick') : L.t('live_title')),
       body: Container(
@@ -1128,8 +1536,12 @@ class _LiveScreenState extends State<LiveScreen> {
             : error != null
                 ? _empty(error!)
                 : narrow
-                    ? Column(children: [_catBar(), const SizedBox(height: 6), Expanded(child: _list())])
-                    : Row(children: [SizedBox(width: kDesktop ? 320 : 240, child: _sidebar()), Expanded(child: _list())]),
+                    ? Column(children: [_catBar(), const SizedBox(height: 6), Expanded(child: _list(false))])
+                    : Row(children: [
+                        SizedBox(width: kDesktop ? 320 : 240, child: _sidebar()),
+                        Expanded(child: _list(wide)),
+                        if (wide) _previewPanel(),
+                      ]),
       ),
     );
   }
@@ -1147,7 +1559,13 @@ class _LiveScreenState extends State<LiveScreen> {
               margin: EdgeInsets.symmetric(horizontal: 8, vertical: kDesktop ? 3 : 2),
               padding: EdgeInsets.symmetric(horizontal: kDesktop ? 16 : 14, vertical: kDesktop ? 15 : 12),
               decoration: BoxDecoration(color: s ? kBlue : Colors.transparent, borderRadius: BorderRadius.circular(10)),
-              child: Text(cats[i].name, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: s ? kBg : kText, fontWeight: FontWeight.w700, fontSize: kDesktop ? 16 : 13.5)),
+              child: Row(children: [
+                Expanded(child: Text(cats[i].name, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: s ? kBg : kText, fontWeight: FontWeight.w700, fontSize: kDesktop ? 16 : 13.5))),
+                if (_catCount(cats[i]) != null) ...[
+                  const SizedBox(width: 8),
+                  Text(_catCount(cats[i])!, style: TextStyle(color: s ? kBg.withValues(alpha: .75) : kMuted, fontWeight: FontWeight.w600, fontSize: kDesktop ? 13 : 11)),
+                ],
+              ]),
             ),
           );
         },
@@ -1162,20 +1580,21 @@ class _LiveScreenState extends State<LiveScreen> {
           separatorBuilder: (_, _) => const SizedBox(width: 8),
           itemBuilder: (c, i) {
             final s = catSel == i;
+            final cnt = _catCount(cats[i]);
             return TvFocus(
               onTap: () => _selectCat(i),
               radius: 21,
               child: Container(
                 alignment: Alignment.center, padding: const EdgeInsets.symmetric(horizontal: 15),
                 decoration: BoxDecoration(color: s ? kBlue : kPanel2, borderRadius: BorderRadius.circular(21), border: Border.all(color: s ? kBlue : kLine)),
-                child: Text(cats[i].name, style: TextStyle(color: s ? kBg : kMuted, fontWeight: FontWeight.w600, fontSize: 12.5)),
+                child: Text(cnt != null ? '${cats[i].name}  $cnt' : cats[i].name, style: TextStyle(color: s ? kBg : kMuted, fontWeight: FontWeight.w600, fontSize: 12.5)),
               ),
             );
           },
         ),
       );
 
-  Widget _list() {
+  Widget _list(bool preview) {
     if (loadingChans) return _loading();
     final items = _filtered;
     return Column(children: [
@@ -1203,19 +1622,15 @@ class _LiveScreenState extends State<LiveScreen> {
                 itemBuilder: (c, i) {
                   final ch = items[i];
                   final fav = FavStore.isFav(ch.id, 'live');
+                  final sel = preview && _pvCh != null && _pvCh!.id == ch.id;
                   return TvFocus(
                     radius: 10,
                     autofocus: i == 0,
-                    onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => widget.catchup
-                        ? CatchupProgramsScreen(streamId: ch.id, name: ch.name)
-                        : PlayerScreen(
-                            title: ch.name, url: Xtream.liveUrl(ch.id),
-                            channels: items, index: i, urlFor: (c) => Xtream.liveUrl(c.id),
-                          ))),
+                    onTap: () => preview ? _preview(ch) : _openFull(items, i), // Desktop breit: Klick = Vorschau; sonst Vollbild
                     child: Container(
                       margin: const EdgeInsets.symmetric(vertical: 3),
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(color: kPanel.withValues(alpha: .4), borderRadius: BorderRadius.circular(10), border: Border.all(color: kLine)),
+                      decoration: BoxDecoration(color: sel ? kBlue.withValues(alpha: .18) : kPanel.withValues(alpha: .4), borderRadius: BorderRadius.circular(10), border: Border.all(color: sel ? kBlue : kLine)),
                       child: Row(children: [
                         SizedBox(width: 34, child: Text(ch.num > 0 ? '${ch.num}' : '${i + 1}', style: const TextStyle(color: kMuted, fontWeight: FontWeight.w700))),
                         _logo(ch.icon),
@@ -1226,7 +1641,12 @@ class _LiveScreenState extends State<LiveScreen> {
                           icon: Icon(fav ? Icons.star_rounded : Icons.star_border_rounded, color: fav ? kBlue : kMuted, size: 20),
                           onPressed: () async { await FavStore.toggle(ch, 'live'); if (mounted) setState(() {}); },
                         ),
-                        const Icon(Icons.play_circle_outline_rounded, color: kMuted, size: 20),
+                        IconButton(
+                          visualDensity: VisualDensity.compact,
+                          tooltip: L.t('fullscreen'),
+                          icon: const Icon(Icons.play_circle_outline_rounded, color: kMuted, size: 22),
+                          onPressed: () => _openFull(items, i), // ▶ = immer Vollbild
+                        ),
                       ]),
                     ),
                   );
@@ -1234,6 +1654,53 @@ class _LiveScreenState extends State<LiveScreen> {
               ),
       ),
     ]);
+  }
+
+  Widget _previewPanel() {
+    return Container(
+      width: 400,
+      margin: const EdgeInsets.fromLTRB(6, 10, 12, 12),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          // Doppelklick auf die Vorschau = Vollbild (wie der Knopf).
+          onDoubleTap: (_pvCh != null && !_inFull)
+              ? () => _openFull(_filtered, _filtered.indexWhere((c) => c.id == _pvCh!.id), full: true)
+              : null,
+          child: AspectRatio(
+          aspectRatio: 16 / 9,
+          child: Container(
+            decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(12), border: Border.all(color: kLine)),
+            clipBehavior: Clip.antiAlias,
+            child: (_pvCh == null || _pvC == null)
+                ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    const Icon(Icons.smart_display_outlined, color: kMuted, size: 40),
+                    const SizedBox(height: 10),
+                    Text(L.t('tap_preview'), style: const TextStyle(color: kMuted, fontSize: 13)),
+                  ]))
+                : _inFull
+                    ? const Center(child: Icon(Icons.open_in_full_rounded, color: kMuted, size: 36)) // läuft gerade im Vollbild
+                    : Video(controller: _pvC!, fit: BoxFit.contain, controls: NoVideoControls),
+          ),
+          ),
+        ),
+        if (_pvCh != null) ...[
+          const SizedBox(height: 12),
+          Text(_pvCh!.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kText, fontSize: 16, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 46,
+            child: FilledButton.icon(
+              style: FilledButton.styleFrom(backgroundColor: kBlue, foregroundColor: kBg, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11))),
+              onPressed: () => _openFull(_filtered, _filtered.indexWhere((c) => c.id == _pvCh!.id), full: true),
+              icon: const Icon(Icons.fullscreen_rounded, size: 22),
+              label: Text(L.t('fullscreen'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+            ),
+          ),
+        ],
+        const Spacer(),
+      ]),
+    );
   }
 
   Widget _logo(String url) => Container(
@@ -1265,6 +1732,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
   }
 
   List<Item>? _allCache; // „Alle" wird im Hintergrund vorgeladen
+  Map<String, int> _counts = {}; // Anzahl je Kategorie (wie IBO)
   String get _favKind => widget.type == 'series' ? 'series' : 'vod';
 
   Future<void> _loadCats() async {
@@ -1278,9 +1746,22 @@ class _CatalogScreenState extends State<CatalogScreen> {
       });
       _selectCat(0);   // startet auf Favoriten
       _preloadAll();   // „Alle" schon im Hintergrund laden, auch wenn man bei Favoriten anfängt
+      _loadCounts();   // Anzahl je Kategorie im Hintergrund holen
     } catch (_) {
       if (mounted) setState(() => loadingCats = false);
     }
+  }
+
+  Future<void> _loadCounts() async {
+    try { final m = await Xtream.categoryCounts(widget.type); if (mounted) setState(() => _counts = m); } catch (_) {}
+  }
+
+  // Anzahl-Label für eine Kategorie (null = nichts anzeigen).
+  String? _catCount(Category c) {
+    if (c.id == '__fav__') return null;
+    if (c.id == '__all__') { final t = _counts.values.fold<int>(0, (a, b) => a + b); return t > 0 ? '$t' : null; }
+    final n = _counts[c.id];
+    return n != null ? '$n' : null;
   }
 
   Future<void> _preloadAll() async {
@@ -1350,7 +1831,13 @@ class _CatalogScreenState extends State<CatalogScreen> {
               margin: EdgeInsets.symmetric(horizontal: 8, vertical: kDesktop ? 3 : 2),
               padding: EdgeInsets.symmetric(horizontal: kDesktop ? 16 : 14, vertical: kDesktop ? 15 : 12),
               decoration: BoxDecoration(color: s ? kBlue : Colors.transparent, borderRadius: BorderRadius.circular(10)),
-              child: Text(cats[i].name, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: s ? kBg : kText, fontWeight: FontWeight.w700, fontSize: kDesktop ? 16 : 13.5)),
+              child: Row(children: [
+                Expanded(child: Text(cats[i].name, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: s ? kBg : kText, fontWeight: FontWeight.w700, fontSize: kDesktop ? 16 : 13.5))),
+                if (_catCount(cats[i]) != null) ...[
+                  const SizedBox(width: 8),
+                  Text(_catCount(cats[i])!, style: TextStyle(color: s ? kBg.withValues(alpha: .75) : kMuted, fontWeight: FontWeight.w600, fontSize: kDesktop ? 13 : 11)),
+                ],
+              ]),
             ),
           );
         },
@@ -1364,13 +1851,14 @@ class _CatalogScreenState extends State<CatalogScreen> {
           separatorBuilder: (_, _) => const SizedBox(width: 8),
           itemBuilder: (c, i) {
             final s = catSel == i;
+            final cnt = _catCount(cats[i]);
             return TvFocus(
               onTap: () => _selectCat(i),
               radius: 21,
               child: Container(
                 alignment: Alignment.center, padding: const EdgeInsets.symmetric(horizontal: 15),
                 decoration: BoxDecoration(color: s ? kBlue : kPanel2, borderRadius: BorderRadius.circular(21), border: Border.all(color: s ? kBlue : kLine)),
-                child: Text(cats[i].name, style: TextStyle(color: s ? kBg : kMuted, fontWeight: FontWeight.w600, fontSize: 12.5)),
+                child: Text(cnt != null ? '${cats[i].name}  $cnt' : cats[i].name, style: TextStyle(color: s ? kBg : kMuted, fontWeight: FontWeight.w600, fontSize: 12.5)),
               ),
             );
           },
@@ -1412,7 +1900,9 @@ class _CatalogScreenState extends State<CatalogScreen> {
     ]);
   }
 
-  Widget _poster(Item it) => TvFocus(
+  Widget _poster(Item it) => _PosterHover(
+      item: it, isSeries: widget.type == 'series',
+      child: _HoverScale(child: TvFocus(
         radius: 10,
         onTap: () async {
           await Navigator.of(context).push(MaterialPageRoute(
@@ -1436,6 +1926,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
           const SizedBox(height: 6),
           Text(it.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kText, fontSize: 12, fontWeight: FontWeight.w600)),
         ]),
+      )),
       );
 }
 
@@ -1698,7 +2189,9 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  Widget _gridPoster(Item it, bool isSeries) => _HoverScale(
+  Widget _gridPoster(Item it, bool isSeries) => _PosterHover(
+    item: it, isSeries: isSeries,
+    child: _HoverScale(
     child: TvFocus(
         radius: 10,
         onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => isSeries ? SeriesDetailScreen(item: it) : MovieDetailScreen(item: it))),
@@ -1718,7 +2211,137 @@ class _SearchScreenState extends State<SearchScreen> {
           Text(it.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kText, fontSize: 12, fontWeight: FontWeight.w600)),
         ]),
       ),
+    ),
     );
+}
+
+// Hover-Infokarte für Film-Kacheln (nur Desktop/Maus): Maus drauf -> kleine Karte mit
+// Jahr/Genre/Dauer/Bewertung, Upload-Datum und Kurzbeschreibung, ohne den Film zu öffnen.
+class _PosterHover extends StatefulWidget {
+  final Item item;
+  final bool isSeries;
+  final Widget child;
+  const _PosterHover({required this.item, required this.isSeries, required this.child});
+  @override
+  State<_PosterHover> createState() => _PosterHoverState();
+}
+
+class _PosterHoverState extends State<_PosterHover> {
+  static final Map<String, Map<String, dynamic>> _cache = {}; // vod_info je Film-ID (einmal laden)
+  final LayerLink _link = LayerLink();
+  OverlayEntry? _entry;
+  Timer? _timer;   // Öffnen verzögern
+  Timer? _close;   // Schließen verzögern (Lücke Kachel<->Karte überbrücken)
+  bool _loading = false;
+
+  @override
+  void dispose() { _timer?.cancel(); _close?.cancel(); _remove(); super.dispose(); }
+
+  void _enter(PointerEnterEvent _) {
+    if (!kDesktop || widget.isSeries) return; // nur Desktop, nur Filme (Serien haben eigene Detailseite)
+    _close?.cancel();
+    _timer?.cancel();
+    _timer = Timer(const Duration(milliseconds: 450), _show); // kurze Verzögerung -> nicht bei jedem Vorbeihuschen
+  }
+  void _exit(PointerExitEvent _) { _timer?.cancel(); _close?.cancel(); _close = Timer(const Duration(milliseconds: 160), _remove); }
+
+  Future<void> _show() async {
+    if (!mounted || _entry != null) return;
+    _insert(); // sofort anzeigen (Titel + „lädt…")
+    if (_cache[widget.item.id] == null && !_loading) {
+      _loading = true;
+      try { final r = await Xtream.vodInfo(widget.item.id); if (r.isNotEmpty) _cache[widget.item.id] = r; } catch (_) {}
+      _loading = false;
+      _entry?.markNeedsBuild(); // mit Daten neu zeichnen
+    }
+  }
+
+  void _remove() { _entry?.remove(); _entry = null; }
+
+  void _insert() {
+    final box = context.findRenderObject() as RenderBox?;
+    if (box == null) return;
+    final pos = box.localToGlobal(Offset.zero);
+    final screenW = MediaQuery.of(context).size.width;
+    final toRight = pos.dx + box.size.width + 360 < screenW; // passt die Karte rechts daneben?
+    _entry = OverlayEntry(builder: (ctx) {
+      return Positioned(
+        width: 340,
+        child: CompositedTransformFollower(
+          link: _link,
+          showWhenUnlinked: false,
+          targetAnchor: toRight ? Alignment.centerRight : Alignment.centerLeft,
+          followerAnchor: toRight ? Alignment.centerLeft : Alignment.centerRight,
+          offset: Offset(toRight ? 10 : -10, 0),
+          child: MouseRegion(
+            onEnter: (_) { _timer?.cancel(); _close?.cancel(); }, // auf der Karte -> offen lassen
+            onExit: _exit,
+            child: _card(),
+          ),
+        ),
+      );
+    });
+    Overlay.of(context).insert(_entry!);
+  }
+
+  Widget _card() {
+    final info = _cache[widget.item.id];
+    final inf = (info?['info'] is Map) ? Map<String, dynamic>.from(info!['info']) : <String, dynamic>{};
+    final md = (info?['movie_data'] is Map) ? Map<String, dynamic>.from(info!['movie_data']) : <String, dynamic>{};
+    final cover = (inf['movie_image'] ?? widget.item.icon).toString();
+    final plot = (inf['plot'] ?? inf['description'] ?? '').toString();
+    final meta = <String>[
+      if ('${inf['releasedate'] ?? ''}'.isNotEmpty) '${inf['releasedate']}'.split('-').first,
+      if ('${inf['genre'] ?? ''}'.isNotEmpty) '${inf['genre']}',
+      if ('${inf['duration'] ?? ''}'.isNotEmpty) '${inf['duration']}',
+      if ('${inf['rating'] ?? ''}'.isNotEmpty && '${inf['rating']}' != '0') '★ ${inf['rating']}',
+    ];
+    final added = _MovieDetailScreenState._fmtAdded('${md['added'] ?? inf['added'] ?? ''}');
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFF151C2B),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: kLine),
+          boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 18, offset: Offset(0, 6))],
+        ),
+        padding: const EdgeInsets.all(12),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: SizedBox(width: 92, height: 138, child: cover.isEmpty
+                ? Container(color: kPanel2, child: const Icon(Icons.movie_rounded, color: kMuted))
+                : Image.network(cover, fit: BoxFit.cover, errorBuilder: (_, _, _) => Container(color: kPanel2, child: const Icon(Icons.movie_rounded, color: kMuted)))),
+          ),
+          const SizedBox(width: 12),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+            Text(widget.item.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kText, fontSize: 14, fontWeight: FontWeight.w800)),
+            if (meta.isNotEmpty) ...[
+              const SizedBox(height: 5),
+              Text(meta.join('  ·  '), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kBlue, fontSize: 11.5, fontWeight: FontWeight.w600)),
+            ],
+            if (added.isNotEmpty) ...[
+              const SizedBox(height: 5),
+              Text('${L.t('uploaded')}: $added', style: const TextStyle(color: kOk, fontSize: 11.5, fontWeight: FontWeight.w700)),
+            ],
+            const SizedBox(height: 7),
+            Text(info == null ? '…' : (plot.isEmpty ? L.t('no_desc') : plot),
+                maxLines: 5, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kMuted, fontSize: 11.5, height: 1.4)),
+          ])),
+        ]),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!kDesktop || widget.isSeries) return widget.child; // Handy/TV + Serien: unverändert
+    return CompositedTransformTarget(
+      link: _link,
+      child: MouseRegion(onEnter: _enter, onExit: _exit, child: widget.child),
+    );
+  }
 }
 
 // Favoriten-Button (Stern) — sitzt direkt bei den Aktions-Buttons im Detail,
@@ -1780,6 +2403,24 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
     if (mounted) setState(() => loading = false);
   }
 
+  // Unix-Zeitstempel (added) -> "TT.MM.JJJJ".
+  static String _fmtAdded(String unix) {
+    final n = int.tryParse(unix.trim());
+    if (n == null || n <= 0) return '';
+    final d = DateTime.fromMillisecondsSinceEpoch(n * 1000);
+    String p(int v) => v.toString().padLeft(2, '0');
+    return '${p(d.day)}.${p(d.month)}.${d.year}';
+  }
+
+  // Beschriftete Info-Zeile (z. B. „Hochgeladen: 06.10.2026").
+  Widget _infoRow(String label, String value, {bool highlight = false}) => Padding(
+        padding: const EdgeInsets.only(top: 9),
+        child: RichText(text: TextSpan(children: [
+          TextSpan(text: '$label: ', style: TextStyle(color: highlight ? kOk : kBlue, fontSize: 13.5, fontWeight: FontWeight.w700)),
+          TextSpan(text: value, style: TextStyle(color: highlight ? kText : kMuted, fontSize: 13.5, fontWeight: highlight ? FontWeight.w700 : FontWeight.w400)),
+        ])),
+      );
+
   @override
   Widget build(BuildContext context) {
     final inf = (info?['info'] is Map) ? Map<String, dynamic>.from(info!['info']) : <String, dynamic>{};
@@ -1793,6 +2434,9 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
       if ('${inf['duration'] ?? ''}'.isNotEmpty) '${inf['duration']}',
       if ('${inf['rating'] ?? ''}'.isNotEmpty && '${inf['rating']}' != '0') '★ ${inf['rating']}',
     ];
+    final added = _fmtAdded('${md['added'] ?? inf['added'] ?? ''}'); // wann der Anbieter den Film hochgeladen hat
+    final director = '${inf['director'] ?? ''}'.trim();
+    final cast = '${inf['cast'] ?? inf['actors'] ?? ''}'.trim();
     return Scaffold(
       appBar: _subBar(context, widget.item.name),
       body: Stack(
@@ -1827,7 +2471,10 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                       const SizedBox(height: 10),
                       if (meta.isNotEmpty) Text(meta.join('   ·   '), style: const TextStyle(color: kBlue, fontSize: 13, fontWeight: FontWeight.w600)),
                       const SizedBox(height: 18),
-                      ConstrainedBox(constraints: const BoxConstraints(maxHeight: 320), child: SingleChildScrollView(child: Text(plot.isEmpty ? L.t('no_desc') : plot, style: const TextStyle(color: kMuted, fontSize: 15, height: 1.55)))),
+                      ConstrainedBox(constraints: const BoxConstraints(maxHeight: 240), child: SingleChildScrollView(child: Text(plot.isEmpty ? L.t('no_desc') : plot, style: const TextStyle(color: kMuted, fontSize: 15, height: 1.55)))),
+                      if (added.isNotEmpty) _infoRow(L.t('uploaded'), added, highlight: true), // vom Nutzer gewünscht: Upload-Datum
+                      if (director.isNotEmpty) _infoRow(L.t('director'), director),
+                      if (cast.isNotEmpty) _infoRow(L.t('cast'), cast),
                       const SizedBox(height: 20),
                       ValueListenableBuilder<int>(
                         valueListenable: Downloads.notifier,
@@ -1996,6 +2643,7 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
                                     final key = 'ep_${e.id}';
                                     final url = Xtream.seriesEpUrl(e.id, e.ext);
                                     final local = Downloads.localPath(key);
+                                    final prog = ContinueStore.progressOf(url);
                                     return TvFocus(
                                       radius: 10,
                                       autofocus: i == 0,
@@ -2003,7 +2651,7 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
                                             title: e.title, url: local ?? url, resume: true, poster: cover,
                                             queue: [for (final ep in eps) Playable(ep.title, Downloads.localPath('ep_${ep.id}') ?? Xtream.seriesEpUrl(ep.id, ep.ext))],
                                             queueIndex: i,
-                                          ))),
+                                          ))).then((_) { if (mounted) setState(() {}); }), // zurück -> Fortschritt/✓ aktualisieren
                                       child: Container(
                                         margin: const EdgeInsets.symmetric(vertical: 4),
                                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -2011,7 +2659,14 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
                                         child: Row(children: [
                                           Container(width: 30, height: 30, alignment: Alignment.center, decoration: BoxDecoration(color: kPanel2, borderRadius: BorderRadius.circular(8)), child: Text('${e.num}', style: const TextStyle(color: kBlue, fontWeight: FontWeight.w700, fontSize: 12))),
                                           const SizedBox(width: 12),
-                                          Expanded(child: Text(e.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kText, fontSize: 14, fontWeight: FontWeight.w600))),
+                                          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                                            Text(e.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kText, fontSize: 14, fontWeight: FontWeight.w600)),
+                                            if (prog != null) ...[
+                                              const SizedBox(height: 7),
+                                              ClipRRect(borderRadius: BorderRadius.circular(3), child: LinearProgressIndicator(value: prog, minHeight: 4, backgroundColor: kLine, valueColor: const AlwaysStoppedAnimation(kBlue))),
+                                            ],
+                                          ])),
+                                          const SizedBox(width: 10),
                                           if (kDesktop) dlControl(context, key: key, title: '${widget.item.name} – ${e.title}', url: url, ext: e.ext, poster: cover, compact: true)
                                           else const Icon(Icons.play_circle_outline_rounded, color: kMuted, size: 20),
                                         ]),
@@ -2120,14 +2775,19 @@ class PlayerScreen extends StatefulWidget {
   final String poster; // fuer „Weiterschauen"
   final List<Playable>? queue; // gesetzt = Vor/Nächster-Track (Episoden), KEIN Live
   final int queueIndex;
-  const PlayerScreen({super.key, required this.title, required this.url, this.channels, this.index = 0, this.urlFor, this.resume = false, this.poster = '', this.queue, this.queueIndex = 0});
+  final Player? adoptPlayer;             // bereits laufender Player (Desktop-Vorschau) -> NICHT neu laden
+  final VideoController? adoptController; // zugehöriger Controller der Vorschau
+  final bool startFullscreen;            // direkt im Vollbild starten (Vollbild-Knopf der Vorschau)
+  final void Function(int)? onIndexChanged; // Live: gewechselten Sender an die Vorschau zurückmelden
+  const PlayerScreen({super.key, required this.title, required this.url, this.channels, this.index = 0, this.urlFor, this.resume = false, this.poster = '', this.queue, this.queueIndex = 0, this.adoptPlayer, this.adoptController, this.startFullscreen = false, this.onIndexChanged});
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
 }
 
 class _PlayerScreenState extends State<PlayerScreen> {
-  late final Player player = Player(configuration: PlayerConfiguration(bufferSize: Prefs.bufferBytes));
-  late final VideoController controller = VideoController(player);
+  late final Player player = widget.adoptPlayer ?? Player(configuration: PlayerConfiguration(bufferSize: Prefs.bufferBytes));
+  late final VideoController controller = widget.adoptController ?? VideoController(player);
+  bool get _adopted => widget.adoptPlayer != null; // Vorschau-Player übernommen -> nicht neu öffnen/entsorgen
   late String title = widget.title;
   late String _url = widget.url;
   late int idx = widget.index;
@@ -2140,8 +2800,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   double _brightness = 0.5;
   BoxFit _fit = BoxFit.contain;
   bool _errShown = false; // verhindert gestapelte Fehler-Dialoge
-  static double _savedVol = 100; // zuletzt gewählte Lautstärke – bleibt über Player-Wechsel erhalten
-  double _vol = _savedVol; // Lautstärke 0..100 (Regler rechts)
+  double _vol = Prefs.volume; // Lautstärke 0..100 (Regler rechts) – zentral gemerkt (Prefs.volume)
   bool _fs = false;  // Fenster-Vollbild (Desktop)
   String _clock = '';
   Timer? _clockTimer;
@@ -2151,6 +2810,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
   String? _fitMsg;   // kurze Format-Anzeige beim Umschalten (Anpassen/Zoom/Strecken)
   Timer? _fitTimer;
   Timer? _saveTimer; // speichert die Position periodisch (auch wenn das Fenster hart geschlossen wird)
+  double? _hoverX;              // Maus-X ueber dem Ladebalken (null = nicht drueber)
+  Duration _hoverTime = Duration.zero; // Zielzeit an dieser Stelle (YouTube-artige Minutenanzeige)
+
+  static String _fmtDur(Duration d) {
+    final h = d.inHours, m = d.inMinutes % 60, s = d.inSeconds % 60;
+    final mm = m.toString().padLeft(2, '0'), ss = s.toString().padLeft(2, '0');
+    return h > 0 ? '$h:$mm:$ss' : '$mm:$ss';
+  }
 
   // Alles einblenden und die 1,5-s-Uhr neu bei 0 starten. Jede Maus-/Tasten-
   // aktion ruft das auf -> bewegt man die Maus, zählt es wieder von vorne.
@@ -2174,11 +2841,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _fitTimer = Timer(const Duration(milliseconds: 1300), () { if (mounted) setState(() => _fitMsg = null); });
   }
 
-  void _setVol(double v) { _vol = v.clamp(0, 100); _savedVol = _vol; player.setVolume(_vol); setState(() {}); }
+  void _setVol(double v) { _vol = v.clamp(0, 100); Prefs.setVolume(_vol); player.setVolume(_vol); setState(() {}); }
 
   Future<void> _toggleFs() async {
     _fs = !_fs;
-    try { await windowManager.setFullScreen(_fs); } catch (_) {}
+    try {
+      await windowManager.setFullScreen(_fs);
+      if (!_fs) {
+        // Windows zeichnet das Fenster nach dem Vollbild-Ende erst beim nächsten Resize neu
+        // -> Bild friert ein (Kanalliste erscheint erst nach Größenänderung). Winziger
+        // Größen-Nudge erzwingt sofort ein Neuzeichnen.
+        final s = await windowManager.getSize();
+        await windowManager.setSize(Size(s.width + 1, s.height + 1));
+        await windowManager.setSize(s);
+      }
+    } catch (_) {}
     if (mounted) setState(() {});
   }
 
@@ -2189,12 +2866,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
   // Manche Anbieter/CDNs (v. a. VOD) lehnen den Standard-Player-User-Agent ab.
   // Ein gängiger IPTV-UA wird überall akzeptiert.
   static const Map<String, String> _kHdr = {'User-Agent': 'IBOPlayer'};
-  void _openUrl() { player.open(Media(_url, httpHeaders: _kHdr)); player.setVolume(_vol); }
+  void _openUrl() { player.setVolume(_vol); player.open(Media(_url, httpHeaders: _kHdr)); } // Lautstärke VOR open -> kein 100%-Blast
 
   @override
   void initState() {
     super.initState();
-    _openUrl();
+    if (_adopted) {
+      // Gemerkte Lautstärke nehmen (NICHT player.state.volume lesen – das ist beim Übernehmen
+      // oft noch der 100%-Default und würde fälschlich übernommen).
+      _vol = Prefs.volume.clamp(0.0, 100.0);
+      player.setVolume(_vol);
+      if (widget.startFullscreen) WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted && !_fs) _toggleFs(); });
+    } else {
+      _openUrl(); // nur frischer Player lädt den Stream (Vorschau läuft schon -> kein Neuladen)
+    }
     _revealUi(); // sichtbar starten, dann nach 1,5 s ausblenden
     _clock = _fmtClock();
     _clockTimer = Timer.periodic(const Duration(seconds: 20), (_) { if (mounted) setState(() => _clock = _fmtClock()); });
@@ -2274,7 +2959,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final dur = player.state.duration.inSeconds;
     if (pos <= 0) return;
     ResumeStore.set(_url, pos, dur);
-    ContinueStore.record(url: _url, title: title, poster: widget.poster, pos: pos, dur: dur);
+    final q = widget.queue; // Staffel-Warteschlange merken -> Weiter/Zurueck auch aus „Weiterschauen"
+    ContinueStore.record(url: _url, title: title, poster: widget.poster, pos: pos, dur: dur,
+        queue: q == null ? null : [for (final p in q) {'t': p.title, 'u': p.url}]);
   }
 
   Future<void> _loadEpg() async {
@@ -2297,7 +2984,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _fitTimer?.cancel();
     if (_fs) { try { windowManager.setFullScreen(false); } catch (_) {} }
     try { ScreenBrightness().resetApplicationScreenBrightness(); } catch (_) {}
-    player.dispose();
+    if (!_adopted) player.dispose(); // übernommenen Vorschau-Player NICHT entsorgen (gehört dem Live-Screen)
     super.dispose();
   }
 
@@ -2315,6 +3002,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     setState(() { idx = n; title = ch[n].name; });
     _openUrl();
     _loadEpg();
+    widget.onIndexChanged?.call(n); // Vorschau merkt sich den gewechselten Sender
   }
 
   // Vor/Nächste Episode (Serien-Warteschlange). Merkt die aktuelle Position zum
@@ -2324,11 +3012,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (q == null) return;
     final n = _qi + delta;
     if (n < 0 || n >= q.length) return;
-    if (widget.resume) {
-      final pos = player.state.position.inSeconds, dur = player.state.duration.inSeconds;
-      ResumeStore.set(_url, pos, dur);
-      ContinueStore.record(url: _url, title: title, poster: widget.poster, pos: pos, dur: dur);
-    }
+    if (widget.resume) { _saveProgress(); } // aktuelle Folge sichern/als gesehen markieren (gleiche Logik)
     _qi = n; _url = q[n].url; _seeked = false;
     setState(() { title = q[n].title; });
     _openUrl();
@@ -2483,7 +3167,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       onBrightnessReset: () { try { ScreenBrightness().resetApplicationScreenBrightness(); } catch (_) {} },
       // Lautstärke-Geste (rechts): media_kit ruft nur diesen Callback – ohne ihn passiert nichts.
       initialVolume: (_vol / 100).clamp(0.0, 1.0),
-      onVolumeChanged: (v) { _vol = (v * 100).clamp(0.0, 100.0); _savedVol = _vol; player.setVolume(_vol); },
+      onVolumeChanged: (v) { _vol = (v * 100).clamp(0.0, 100.0); Prefs.setVolume(_vol); player.setVolume(_vol); },
       // media_kit soll NICHT selbst aus-/einblenden (sein Hover-Timer greift im
       // Vollbild nicht). Das Ein-/Ausblenden macht komplett unser _ui-Timer über
       // den controls-Schalter oben. days:1 = solange sichtbar, wie _ui an ist.
@@ -2551,14 +3235,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
     return Scaffold(
       backgroundColor: Colors.black,
-      body: Focus(
+      body: MouseRegion(
+        cursor: _ui ? MouseCursor.defer : SystemMouseCursors.none, // Steuerung aus -> Mauszeiger weg
+        child: Focus(
         autofocus: true,
         onKeyEvent: (node, event) {
           if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
           _revealUi(); // jede Taste holt die Steuerung zurück + startet die 1,5 s neu
           final k = event.logicalKey;
           // ESC / Zurück -> Player verlassen (Rettungsanker am Desktop).
-          if (k == LogicalKeyboardKey.escape || k == LogicalKeyboardKey.browserBack) { Navigator.of(context).maybePop(); return KeyEventResult.handled; }
+          if (k == LogicalKeyboardKey.escape || k == LogicalKeyboardKey.browserBack) {
+            if (_fs) { _toggleFs(); } else { Navigator.of(context).maybePop(); } // Vollbild: ESC verlässt nur Vollbild, nicht den Stream
+            return KeyEventResult.handled;
+          }
           if (live && (k == LogicalKeyboardKey.arrowUp || k == LogicalKeyboardKey.channelUp)) { _zap(-1); return KeyEventResult.handled; }
           if (live && (k == LogicalKeyboardKey.arrowDown || k == LogicalKeyboardKey.channelDown)) { _zap(1); return KeyEventResult.handled; }
           if (!live && k == LogicalKeyboardKey.arrowUp) { _setVol(_vol + 5); return KeyEventResult.handled; }
@@ -2670,8 +3359,45 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 ),
               ),
             ),
+          // Minutenanzeige beim Hovern ueber dem Ladebalken (wie YouTube: welche Zeit treffe ich?).
+          // Durchsichtiger Streifen genau ueber der media_kit-Seek-Bar; Klicks/Ziehen gehen durch.
+          if (!live)
+            Positioned(
+              left: ins(safe.left, 20), right: ins(safe.right, 20),
+              bottom: (kDesktop ? 96 : 62), height: (kDesktop ? 48 : 44),
+              child: LayoutBuilder(builder: (ctx, cons) {
+                final w = cons.maxWidth;
+                final show = _ui && _hoverX != null && player.state.duration.inSeconds > 0;
+                return MouseRegion(
+                  opaque: false, // nur Hover beobachten, Klicks/Ziehen auf die Seek-Bar nicht blockieren
+                  onHover: (e) {
+                    final dur = player.state.duration;
+                    if (dur.inSeconds <= 0 || w <= 0) return;
+                    final frac = (e.localPosition.dx / w).clamp(0.0, 1.0);
+                    setState(() { _hoverX = e.localPosition.dx.clamp(0.0, w); _hoverTime = dur * frac; });
+                  },
+                  onExit: (_) { if (_hoverX != null) setState(() => _hoverX = null); },
+                  child: IgnorePointer(
+                    child: Stack(clipBehavior: Clip.none, children: [
+                      const SizedBox.expand(),
+                      if (show)
+                        Positioned(
+                          left: (_hoverX! - 32).clamp(0.0, (w - 64).clamp(0.0, w)),
+                          bottom: (kDesktop ? 50 : 46),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(color: Colors.black.withValues(alpha: .82), borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.white24)),
+                            child: Text(_fmtDur(_hoverTime), style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700, fontFeatures: [FontFeature.tabularFigures()])),
+                          ),
+                        ),
+                    ]),
+                  ),
+                );
+              }),
+            ),
         ]),
         ),
+      ),
       ),
     );
   }
@@ -3004,11 +3730,28 @@ class _AccountScreenState extends State<AccountScreen> {
   }
 
   Future<void> _load() async {
-    final i = Session.account != null ? await Xtream.userInfo(Session.account!) : null;
-    if (mounted) setState(() { info = i; loading = false; });
+    // Screen SOFORT zeigen (Playlists, MAC, Buttons brauchen keine Server-Abfrage).
+    if (mounted) setState(() => loading = false);
+    if (Session.account == null) return;
+    // Konto-Details (Status/Verbindungen/Ablauf) im HINTERGRUND nachladen -> hängt nicht am lahmen Anbieter.
+    final i = await Xtream.userInfo(Session.account!);
+    if (mounted && i != null) setState(() => info = i);
   }
 
   Future<void> _logout() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: kPanel,
+        title: Text(L.t('logout_q'), style: const TextStyle(color: kText, fontSize: 16)),
+        content: Text(L.t('logout_body'), style: const TextStyle(color: kMuted)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(L.t('cancel'))),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: Text(L.t('logout'), style: const TextStyle(color: Color(0xFFE0554E), fontWeight: FontWeight.w700))),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
     await Session.clear();
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const ActivationScreen()), (_) => false);
@@ -3022,7 +3765,7 @@ class _AccountScreenState extends State<AccountScreen> {
       builder: (_) => AlertDialog(
         backgroundColor: kPanel,
         title: Text(L.t('reload_playlist'), style: const TextStyle(color: kText)),
-        content: Text(L.t('reload_confirm'), style: const TextStyle(color: kMuted)),
+        content: Text(L.t('reload_local_confirm'), style: const TextStyle(color: kMuted)),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(L.t('cancel'))),
           TextButton(onPressed: () => Navigator.pop(context, true), child: Text(L.t('reload'))),
@@ -3031,7 +3774,24 @@ class _AccountScreenState extends State<AccountScreen> {
     );
     if (ok != true || !mounted) return;
     setState(() => loading = true);
-    final st = await Session.syncFromActivation(); // frischer Server-Stand (velaplayer.com = Wahrheit)
+    // Test-Modus: die LOKAL aktive Playlist frisch laden (Cache umgehen), nicht Server-Sync.
+    if (License.freeForTesting) {
+      final act = PlaylistStore.active();
+      final okR = act == null
+          ? false
+          : (act.mode == 'm3u' ? await Session.loadM3u(act.url, allowCache: false) : await Session.applyProfile(act));
+      if (!mounted) return;
+      if (okR) {
+        await loadScopedStores();
+        if (!mounted) return;
+        Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const HomeGate()), (_) => false);
+      } else {
+        setState(() => loading = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(backgroundColor: kPanel, content: Text('${L.t('reload_fail')} [${Session.lastErr}]', style: const TextStyle(color: kText))));
+      }
+      return;
+    }
+    final st = await Session.syncFromActivation(); // Produktiv: frischer Server-Stand (velaplayer.com = Wahrheit)
     if (!mounted) return;
     if (st == 'ok') {
       // Sitzung evtl. geändert → alles frisch aufbauen (Gate prüft Lizenz + Playlist neu).
@@ -3046,6 +3806,167 @@ class _AccountScreenState extends State<AccountScreen> {
       setState(() => loading = false);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(backgroundColor: kPanel, content: Text(L.t('reload_offline'), style: const TextStyle(color: kText))));
     }
+  }
+
+  // Auf eine gespeicherte Playlist umschalten (lädt sie, nutzt Cache -> schnell).
+  Future<void> _switchTo(PlaylistProfile p) async {
+    // Nur überspringen, wenn diese Playlist WIRKLICH schon geladen ist (nicht nur als „aktiv" markiert).
+    final loadedId = Session.mode == 'm3u'
+        ? 'm|${Session.m3uUrl}'
+        : (Session.account != null ? 'x|${Session.account!.host}|${Session.account!.user}' : '');
+    if (p.identity == loadedId && p.id == PlaylistStore.activeId) return;
+    setState(() => loading = true);
+    final ok = await Session.applyProfile(p); // ERST laden …
+    if (!mounted) return;
+    if (ok) {
+      await PlaylistStore.setActive(p.id);    // … dann erst als aktiv markieren (sonst Anzeige ≠ geladen)
+      await loadScopedStores();
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const HomeGate()), (_) => false);
+    } else {
+      setState(() => loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(backgroundColor: kPanel, content: Text('${L.t('playlist_load_err')} [${Session.lastErr}]', style: const TextStyle(color: kText))));
+    }
+  }
+
+  Future<void> _deletePlaylist(PlaylistProfile p) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: kPanel,
+        title: Text(L.t('delete_playlist_q'), style: const TextStyle(color: kText, fontSize: 16)),
+        content: Text(p.name, style: const TextStyle(color: kMuted)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(L.t('cancel'))),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: Text(L.t('delete'), style: const TextStyle(color: Color(0xFFE0554E), fontWeight: FontWeight.w700))),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final wasActive = p.id == PlaylistStore.activeId;
+    await PlaylistStore.remove(p.id); // setzt activeId auf die erste verbleibende
+    if (!wasActive) { if (mounted) setState(() {}); return; }
+    // Die AKTIVE wurde gelöscht -> geladene Liste muss weg.
+    final next = PlaylistStore.active();
+    if (next == null) {
+      // Keine Playlist mehr -> abmelden, zurück zum Start.
+      await Session.clear();
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const ActivationScreen()), (_) => false);
+      return;
+    }
+    // Nächste nur als aktiv SETZEN, NICHT laden — damit Löschen sofort zurückkommt
+    // (wer 10 Listen löscht, wartet sonst bei jedem Mal auf einen großen M3U-Download).
+    // Geladen wird erst, wenn man die Playlist wirklich öffnet (HomeGate / „Neu laden").
+    Session.m3u = [];                       // gelöschte Liste aus dem Speicher werfen
+    await Session.setProfileNoLoad(next);   // schnell, kein Download
+    await loadScopedStores();               // Favoriten/Weiterschauen der neuen Playlist
+    if (mounted) setState(() => loading = false);
+  }
+
+  Widget _playlistsSection(BuildContext context) {
+    final pls = PlaylistStore.items();
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        Text(L.t('my_playlists'), style: const TextStyle(color: kText, fontSize: 15, fontWeight: FontWeight.w700, fontFamily: 'serif')),
+        const Spacer(),
+        TvFocus(
+          radius: 10,
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ConnectScreen())),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(color: kBlue, borderRadius: BorderRadius.circular(10)),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              const Icon(Icons.add_rounded, color: kBg, size: 18), const SizedBox(width: 6),
+              Text(L.t('add'), style: const TextStyle(color: kBg, fontWeight: FontWeight.w700, fontSize: 13)),
+            ]),
+          ),
+        ),
+      ]),
+      const SizedBox(height: 12),
+      if (pls.isEmpty)
+        Container(
+          width: double.infinity, padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(color: kPanel.withValues(alpha: .5), borderRadius: BorderRadius.circular(12), border: Border.all(color: kLine)),
+          child: Text(L.t('no_playlists_hint'), style: const TextStyle(color: kMuted, fontSize: 13)),
+        )
+      else
+        Wrap(spacing: 12, runSpacing: 12, children: [for (final p in pls) _playlistCard(context, p, p.id == PlaylistStore.activeId)]),
+    ]);
+  }
+
+  // Genau DIESE Playlist frisch laden (Cache leeren) — ohne löschen/umschalten-dann-reload.
+  Future<void> _reloadPlaylist(PlaylistProfile p) async {
+    setState(() => loading = true);
+    if (p.mode == 'm3u') await Session.clearM3uCache(p.url); // Cache weg -> wirklich frisch
+    await PlaylistStore.setActive(p.id);
+    final ok = p.mode == 'm3u'
+        ? await Session.loadM3u(p.url, allowCache: false)
+        : await Session.applyProfile(p);
+    if (!mounted) return;
+    if (ok) {
+      await loadScopedStores();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(backgroundColor: kPanel, content: Text(L.t('reloaded_ok'), style: const TextStyle(color: kOk, fontWeight: FontWeight.w700))));
+      Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const HomeGate()), (_) => false);
+    } else {
+      setState(() => loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(backgroundColor: kPanel, content: Text('${L.t('reload_fail')} [${Session.lastErr}]', style: const TextStyle(color: kText))));
+    }
+  }
+
+  Widget _playlistCard(BuildContext context, PlaylistProfile p, bool active) {
+    return SizedBox(
+      width: 260,
+      child: Stack(children: [
+        TvFocus(
+          radius: 12,
+          onTap: () => _switchTo(p),
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: active ? kBlue.withValues(alpha: .16) : kPanel.withValues(alpha: .5),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: active ? kBlue : kLine, width: active ? 1.5 : 1),
+            ),
+            child: Row(children: [
+              Icon(p.mode == 'm3u' ? Icons.playlist_play_rounded : Icons.dns_rounded, color: active ? kBlue : kMuted, size: 26),
+              const SizedBox(width: 12),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                Text(p.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: kText, fontWeight: FontWeight.w700, fontSize: 14)),
+                const SizedBox(height: 3),
+                Text(active ? '● ${L.t('active')}' : (p.mode == 'm3u' ? L.t('m3u_playlist') : 'Xtream · ${p.user}'), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: active ? kOk : kMuted, fontSize: 12, fontWeight: FontWeight.w600)),
+              ])),
+            ]),
+          ),
+        ),
+        Positioned(
+          top: 2, right: 2,
+          child: TvFocus(
+            radius: 12,
+            onTap: () => _deletePlaylist(p),
+            child: Container(
+              width: 24, height: 24,
+              decoration: BoxDecoration(color: kBg.withValues(alpha: .7), shape: BoxShape.circle, border: Border.all(color: kLine)),
+              child: const Icon(Icons.close_rounded, color: kMuted, size: 14),
+            ),
+          ),
+        ),
+        // ↻ Diese Playlist frisch laden (Cache leeren) — ohne löschen
+        Positioned(
+          top: 2, right: 30,
+          child: TvFocus(
+            radius: 12,
+            onTap: () => _reloadPlaylist(p),
+            child: Container(
+              width: 24, height: 24,
+              decoration: BoxDecoration(color: kBg.withValues(alpha: .7), shape: BoxShape.circle, border: Border.all(color: kLine)),
+              child: const Icon(Icons.refresh_rounded, color: kBlue, size: 15),
+            ),
+          ),
+        ),
+      ]),
+    );
   }
 
   @override
@@ -3090,7 +4011,9 @@ class _AccountScreenState extends State<AccountScreen> {
                       label: Text(L.t('reload_playlist'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
                     ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 18),
+                  _playlistsSection(context),
+                  const SizedBox(height: 18),
                   GridView.builder(
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),

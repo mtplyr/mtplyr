@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 import 'dart:ui' show PlatformDispatcher;
 import 'package:crypto/crypto.dart';
@@ -34,10 +35,11 @@ class Account {
   Account(this.host, this.user, this.pass);
 }
 
-/// Ein Sender aus einer M3U-Playlist (direkte Stream-URL, kein Xtream).
+/// Ein Eintrag aus einer M3U-Playlist (direkte Stream-URL, kein Xtream).
+/// kind: 'live' | 'vod' | 'series' (aus dem URL-Pfad erkannt). ext: Datei-Endung (Filme/Serien).
 class M3uChannel {
-  final String name, logo, group, url;
-  M3uChannel(this.name, this.logo, this.group, this.url);
+  final String name, logo, group, url, kind, ext;
+  M3uChannel(this.name, this.logo, this.group, this.url, {this.kind = 'live', this.ext = ''});
 }
 
 /// Aktuelle Sitzung (Zugangsdaten), persistiert.
@@ -64,10 +66,19 @@ class Session {
     deviceKey = p.getString('device_key') ?? '';
     if (mac.isEmpty) { mac = _genMac(); await p.setString('device_mac', mac); }
     if (deviceKey.isEmpty) { deviceKey = _genKey(); await p.setString('device_key', deviceKey); }
-    // Playlist-Quelle wiederherstellen (M3U -> beim Start neu laden).
+    // Playlist-Quelle nur MERKEN (nicht laden!). Das Laden der (großen) M3U passiert
+    // NACH dem ersten Frame im HomeGate (mit Spinner) -> Fenster erscheint sofort.
     mode = p.getString('src_mode') ?? 'xtream';
     m3uUrl = p.getString('m3u_url') ?? '';
-    if (mode == 'm3u' && m3uUrl.isNotEmpty) { await loadM3u(m3uUrl, persist: false); }
+  }
+
+  /// Gibt es eine gespeicherte M3U-Quelle, die noch geladen werden muss?
+  static bool get hasStoredM3u => mode == 'm3u' && m3uUrl.isNotEmpty;
+
+  /// Die gemerkte M3U-Quelle jetzt tatsächlich laden (Cache -> schnell). Nach UI-Start aufrufen.
+  static Future<bool> restoreActive() async {
+    if (hasStoredM3u && m3u.isEmpty) return await loadM3u(m3uUrl, persist: false, allowCache: true);
+    return true;
   }
 
   // Geräte-Identität wie vela/mtplyr/IBO: virtuelle MAC + Geräteschlüssel.
@@ -88,41 +99,48 @@ class Session {
   ///   'none'  = Server erreichbar, aber KEINE Playlist mehr verknüpft (auf velaplayer.com gelöscht)
   ///   'error' = Server nicht erreichbar / Provider-Aussetzer -> lokalen Stand behalten (offline)
   static Future<String> syncFromActivation() async {
-    if (mac.isEmpty) return 'error';
+    if (mac.isEmpty) { lastErr = 'act: MAC leer'; return 'error'; }
     try {
       final uri = Uri.parse(kActivate).replace(queryParameters: {'mac': mac, 'key': deviceKey, 'brand': kBrandKey});
       final r = await http.get(uri).timeout(const Duration(seconds: 15));
-      if (r.statusCode != 200) return 'error';
+      if (r.statusCode != 200) { lastErr = 'act HTTP ${r.statusCode}'; return 'error'; }
       final j = jsonDecode(r.body);
-      if (j is! Map) return 'error';
+      if (j is! Map) { lastErr = 'act kein-json'; return 'error'; }
       if ('${j['host'] ?? ''}'.isNotEmpty) {
-        final a = Account('${j['host']}', '${j['username'] ?? j['user'] ?? ''}', '${j['password'] ?? j['pass'] ?? ''}');
-        if (await Xtream.userInfo(a) == null) return 'error'; // Provider gerade nicht erreichbar -> nicht löschen
-        await save(a);
-        return 'ok';
+        final host = '${j['host']}', user = '${j['username'] ?? j['user'] ?? ''}', pass = '${j['password'] ?? j['pass'] ?? ''}';
+        // M3U-FIRST (wie Android/Samsung-TV & IBO): den get.php-m3u_plus-Export laden.
+        // Zuverlässig auch bei gesperrtem player_api (z. B. d67 liefert dort nur user_info).
+        final m3uLink = '${Xtream.base(host)}/get.php?username=${Uri.encodeQueryComponent(user)}&password=${Uri.encodeQueryComponent(pass)}&type=m3u_plus&output=ts';
+        if (await loadM3u(m3uLink, allowCache: true)) return 'ok';
+        // Rückfall: doch als Xtream (falls M3U-Export gesperrt, player_api aber funktioniert).
+        final a = Account(host, user, pass);
+        if (await Xtream.userInfo(a) != null) { await save(a); return 'ok'; }
+        lastErr = 'weder M3U noch Xtream nutzbar (host=$host) [$lastErr]';
+        return 'error';
       }
       if (j['message'] == 'm3u_only' && '${j['raw_url'] ?? ''}'.isNotEmpty) {
-        return await loadM3u('${j['raw_url']}') ? 'ok' : 'error';
+        final okm = await loadM3u('${j['raw_url']}'); if (!okm) lastErr = 'm3u load fehl'; return okm ? 'ok' : 'error';
       }
-      // 'pending' = Gerät ohne (aktive) Playlist -> auf velaplayer.com gelöscht/noch keine.
       if (j['message'] == 'pending') return 'none';
-    } catch (_) {}
+      lastErr = 'act body=${r.body}';
+    } catch (e) { lastErr = 'act ex: $e'; }
     return 'error'; // expired/blocked/unbekannt: Lizenz-Gate regelt das, Playlist NICHT anfassen
   }
 
   /// Holt die dem MAC/Key zugewiesene Playlist vom Hub und richtet die Sitzung ein.
   /// true = bereit (Xtream ODER M3U geladen).
-  static Future<bool> pullActivation() async => (await syncFromActivation()) == 'ok';
+  static Future<bool> pullActivation() async => (await syncFromActivation()) == 'ok'; // lastErr wird in syncFromActivation gesetzt
 
   /// Manuell in der App eingegebene Xtream-Playlist an velaplayer.com melden,
   /// damit sie dort (für Kunde/Reseller) sichtbar ist und der Server die Wahrheit bleibt.
   /// true = auf dem Server gespeichert.
-  static Future<bool> pushXtreamToServer(Account a) async {
+  static Future<bool> pushXtreamToServer(Account a, {String name = ''}) async {
     if (mac.isEmpty) return false;
     try {
       final r = await http.post(Uri.parse(kAddPlaylist), body: {
         'mac': mac, 'key': deviceKey, 'brand': kBrandKey,
         'type': 'xtream', 'xt_server': a.host, 'xt_user': a.user, 'xt_pass': a.pass,
+        if (name.isNotEmpty) 'name': name,
       }).timeout(const Duration(seconds: 20));
       if (r.statusCode != 200) return false;
       final j = jsonDecode(r.body);
@@ -132,17 +150,21 @@ class Session {
 
   /// Manuell in der App eingegebene M3U-Link-Playlist an velaplayer.com melden.
   /// true = auf dem Server gespeichert.
-  static Future<bool> pushM3uToServer(String url) async {
-    if (mac.isEmpty) return false;
+  static String lastErr = ''; // DIAGNOSE: warum push/pull fehlschlug
+  static Future<bool> pushM3uToServer(String url, {String name = ''}) async {
+    if (mac.isEmpty) { lastErr = 'MAC leer'; return false; }
     try {
       final r = await http.post(Uri.parse(kAddPlaylist), body: {
         'mac': mac, 'key': deviceKey, 'brand': kBrandKey,
         'type': 'url', 'url': url,
+        if (name.isNotEmpty) 'name': name,
       }).timeout(const Duration(seconds: 20));
-      if (r.statusCode != 200) return false;
+      if (r.statusCode != 200) { lastErr = 'HTTP ${r.statusCode}'; return false; }
       final j = jsonDecode(r.body);
-      return j is Map && j['success'] == true;
-    } catch (_) { return false; }
+      if (j is Map && j['success'] == true) return true;
+      lastErr = 'Antwort: ${r.body}';
+      return false;
+    } catch (e) { lastErr = 'Ausnahme: $e'; return false; }
   }
 
   /// Geraet beim Hub anmelden (MAC+Key+Marke). Idempotent: legt das Geraet an bzw.
@@ -157,22 +179,147 @@ class Session {
     } catch (_) {}
   }
 
-  /// M3U-Playlist von einer URL laden, parsen und als aktive Quelle setzen.
-  static Future<bool> loadM3u(String url, {bool persist = true}) async {
+  /// Lokale Cache-Dateien für eine M3U-URL (im Temp-Verzeichnis, per URL-Hash benannt).
+  /// .cache = rohe M3U (spart Download), .parsed = schon geparste Liste (spart auch das Parsen
+  /// von ~320.000 Einträgen -> JEDER weitere Start ist fast sofort, wie IBO).
+  static const Duration _m3uCacheTtl = Duration(days: 3);
+  static String? _cacheBase(String url) {
+    try { return '${Directory.systemTemp.path}${Platform.pathSeparator}vela_m3u_${md5.convert(utf8.encode(url))}'; }
+    catch (_) { return null; }
+  }
+  static File? _m3uCacheFile(String url) { final b = _cacheBase(url); return b == null ? null : File('$b.cache'); }
+  static File? _m3uParsedFile(String url) { final b = _cacheBase(url); return b == null ? null : File('$b.parsed'); }
+
+  /// Lokalen Cache (roh + geparst) einer M3U löschen -> erzwingt frischen Download.
+  static Future<void> clearM3uCache(String url) async {
+    for (final f in [_m3uCacheFile(url), _m3uParsedFile(url)]) {
+      try { if (f != null && f.existsSync()) await f.delete(); } catch (_) {}
+    }
+  }
+
+  /// Alte Playlist-Caches im Temp aufräumen (älter als TTL), damit sich nicht GB anstauen.
+  /// Die aktuell aktive M3U wird NIE gelöscht. Läuft im Hintergrund beim Start.
+  static Future<void> cleanupOldCaches() async {
     try {
-      final r = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 25));
-      if (r.statusCode != 200) return false;
-      final chans = parseM3u(r.body);
-      if (chans.isEmpty) return false;
-      m3u = chans; m3uUrl = url; mode = 'm3u'; account = null;
-      if (persist) {
-        final p = await SharedPreferences.getInstance();
-        await p.setString('src_mode', 'm3u');
-        await p.setString('m3u_url', url);
-        await p.remove('xt_host'); await p.remove('xt_user'); await p.remove('xt_pass');
+      final dir = Directory(Directory.systemTemp.path);
+      if (!dir.existsSync()) return;
+      final keepBase = (mode == 'm3u' && m3uUrl.isNotEmpty) ? _cacheBase(m3uUrl) : null;
+      final cutoff = DateTime.now().subtract(_m3uCacheTtl);
+      for (final e in dir.listSync()) {
+        if (e is! File) continue;
+        final name = e.uri.pathSegments.isNotEmpty ? e.uri.pathSegments.last : '';
+        if (!name.startsWith('vela_m3u_')) continue;
+        if (keepBase != null && e.path.startsWith(keepBase)) continue; // aktive behalten
+        try { if (e.lastModifiedSync().isBefore(cutoff)) e.deleteSync(); } catch (_) {}
       }
-      return true;
-    } catch (_) { return false; }
+    } catch (_) {}
+  }
+
+  /// Geparste Liste kompakt serialisieren (Tab-getrennt) -> beim nächsten Start nur split statt
+  /// #EXTINF-Attribute neu zu zerlegen. Deutlich schneller als parseM3u.
+  static String _serializeM3u(List<M3uChannel> list) {
+    final sb = StringBuffer();
+    for (final c in list) {
+      sb.write(c.name.replaceAll('\t', ' ')); sb.write('\t');
+      sb.write(c.logo); sb.write('\t');
+      sb.write(c.group.replaceAll('\t', ' ')); sb.write('\t');
+      sb.write(c.url); sb.write('\t');
+      sb.write(c.kind); sb.write('\t');
+      sb.write(c.ext); sb.write('\n');
+    }
+    return sb.toString();
+  }
+  static List<M3uChannel> _deserializeM3u(String text) {
+    final out = <M3uChannel>[];
+    for (final line in text.split('\n')) {
+      if (line.isEmpty) continue;
+      final p = line.split('\t');
+      if (p.length < 6) continue;
+      out.add(M3uChannel(p[0], p[1], p[2], p[3], kind: p[4], ext: p[5]));
+    }
+    return out;
+  }
+  static Future<void> _writeParsed(String url, List<M3uChannel> chans) async {
+    try { final pf = _m3uParsedFile(url); if (pf != null) await pf.writeAsString(_serializeM3u(chans), flush: false); } catch (_) {}
+  }
+
+  static void _applyM3u(List<M3uChannel> chans, String url) {
+    m3u = chans; m3uUrl = url; mode = 'm3u'; account = null;
+  }
+
+  /// Session-Cookie holen: erst player_api (Login) aufrufen, Set-Cookie zurückgeben.
+  /// Nötig für Anbieter, die get.php nur mit gültiger Session ausliefern (403 sonst).
+  static Future<String?> _primeCookie(String getUrl) async {
+    try {
+      final u = Uri.parse(getUrl);
+      final user = u.queryParameters['username'], pass = u.queryParameters['password'];
+      if (user == null || pass == null) return null;
+      final api = u.replace(path: '/player_api.php', queryParameters: {'username': user, 'password': pass});
+      final r = await http.get(api).timeout(const Duration(seconds: 15));
+      final sc = r.headers['set-cookie'];
+      if (sc == null || sc.isEmpty) return null;
+      return sc.split(';').first.trim(); // nur name=value (z. B. PHPSESSID=…)
+    } catch (_) { return null; }
+  }
+
+  static Future<void> _persistM3u(String url) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString('src_mode', 'm3u');
+    await p.setString('m3u_url', url);
+    await p.remove('xt_host'); await p.remove('xt_user'); await p.remove('xt_pass');
+  }
+
+  /// M3U-Playlist laden, parsen, als aktive Quelle setzen.
+  /// allowCache=true: wenn eine frische lokale Kopie (<12 h) da ist, OHNE Netz laden
+  /// (macht den 2. Start so schnell wie IBO). Sonst 89 MB neu ziehen + Cache schreiben.
+  static Future<bool> loadM3u(String url, {bool persist = true, bool allowCache = false}) async {
+    // 1) Frischer Cache? -> ohne Download laden.
+    if (allowCache) {
+      try {
+        // a) Schon GEPARSTER Cache -> nur einlesen (schnellster Weg, wie IBO).
+        final pf = _m3uParsedFile(url);
+        if (pf != null && pf.existsSync() && DateTime.now().difference(pf.lastModifiedSync()) < _m3uCacheTtl) {
+          final chans = _deserializeM3u(await pf.readAsString());
+          if (chans.isNotEmpty) { _applyM3u(chans, url); if (persist) await _persistM3u(url); return true; }
+        }
+        // b) Rohe M3U im Cache -> parsen und geparsten Cache fürs nächste Mal schreiben.
+        final f = _m3uCacheFile(url);
+        if (f != null && f.existsSync() && DateTime.now().difference(f.lastModifiedSync()) < _m3uCacheTtl) {
+          final chans = parseM3u(utf8.decode(await f.readAsBytes(), allowMalformed: true));
+          if (chans.isNotEmpty) { _applyM3u(chans, url); await _writeParsed(url, chans); if (persist) await _persistM3u(url); return true; }
+        }
+      } catch (_) { /* Cache kaputt -> normal laden */ }
+    }
+    // 2) Aus dem Netz laden — mit Wiederholung, falls der Anbieter die Verbindung
+    //    mitten im Download abwirft ("Connection closed", Timeout). Manche Server (d67)
+    //    drosseln/kappen große Transfers; ein erneuter Versuch kommt oft durch.
+    Object? dlErr;
+    for (var attempt = 1; attempt <= 3; attempt++) {
+      try {
+        var r = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 300)); // sehr große m3u_plus (100+ MB)
+        // Session-Sperre (403/401 ohne Login): erst player_api (Login) -> Cookie -> get.php erneut (wie IBO).
+        if (r.statusCode == 403 || r.statusCode == 401) {
+          final cookie = await _primeCookie(url);
+          if (cookie != null) { r = await http.get(Uri.parse(url), headers: {'cookie': cookie}).timeout(const Duration(seconds: 300)); }
+        }
+        if (r.statusCode != 200) { dlErr = 'HTTP ${r.statusCode}'; }
+        else {
+          // M3U ist UTF-8 -> Rohbytes explizit dekodieren (sonst kaputte Zeichen).
+          final chans = parseM3u(utf8.decode(r.bodyBytes, allowMalformed: true));
+          if (chans.isEmpty) { dlErr = 'leer: 0 Kanäle aus ${r.bodyBytes.length} Bytes'; }
+          else {
+            _applyM3u(chans, url);
+            try { final f = _m3uCacheFile(url); if (f != null) await f.writeAsBytes(r.bodyBytes, flush: false); } catch (_) {} // rohe M3U cachen
+            await _writeParsed(url, chans); // geparste Liste cachen -> nächster Start fast sofort
+            if (persist) await _persistM3u(url);
+            return true;
+          }
+        }
+      } catch (e) { dlErr = e; }
+      if (attempt < 3) await Future.delayed(Duration(seconds: 2 * attempt)); // kurze Pause, dann neuer Versuch
+    }
+    lastErr = 'm3u $dlErr (nach 3 Versuchen)';
+    return false;
   }
 
   /// Standard-M3U parsen: #EXTINF (tvg-logo, group-title, Name) + folgende URL-Zeile.
@@ -190,16 +337,36 @@ class Session {
       } else if (line.startsWith('#')) {
         continue; // andere Direktiven ignorieren
       } else {
-        out.add(M3uChannel(name.isEmpty ? line : name, logo, group.isEmpty ? 'Sender' : group, line));
+        // Typ aus dem URL-Pfad: .../series/... = Serie, .../movie/... = Film, sonst Live.
+        final kind = line.contains('/series/') ? 'series' : (line.contains('/movie/') ? 'vod' : 'live');
+        out.add(M3uChannel(name.isEmpty ? line : name, logo, group.isEmpty ? 'Sender' : group, line,
+            kind: kind, ext: kind == 'live' ? '' : _extOf(line)));
         name = ''; logo = ''; group = '';
       }
     }
     return out;
   }
 
+  /// Datei-Endung aus einer Stream-URL (mkv/mp4/…); leer wenn keine sinnvolle.
+  static String _extOf(String url) {
+    var q = url.indexOf('?'); final u = q < 0 ? url : url.substring(0, q);
+    final slash = u.lastIndexOf('/');
+    final dot = u.lastIndexOf('.');
+    if (dot < 0 || dot < slash) return '';
+    final e = u.substring(dot + 1).toLowerCase();
+    if (e.isEmpty || e.length > 4) return '';
+    for (var i = 0; i < e.length; i++) { final c = e.codeUnitAt(i); if (!((c >= 97 && c <= 122) || (c >= 48 && c <= 57))) return ''; }
+    return e;
+  }
+
+  // Ohne Regex (wird pro Zeile 2× aufgerufen -> bei 320k Zeilen entscheidend fürs Tempo).
   static String _m3uAttr(String line, String key) {
-    final m = RegExp('$key="([^"]*)"').firstMatch(line);
-    return m != null ? m.group(1)! : '';
+    final k = '$key="';
+    final i = line.indexOf(k);
+    if (i < 0) return '';
+    final start = i + k.length;
+    final end = line.indexOf('"', start);
+    return end < 0 ? '' : line.substring(start, end);
   }
 
   static Future<void> save(Account a) async {
@@ -221,6 +388,28 @@ class Session {
     await p.remove('m3u_url');
     account = null; mode = 'xtream'; m3u = []; m3uUrl = '';
   }
+
+  /// Eine gespeicherte Playlist zur aktiven Quelle machen (Umschalten in der Playlist-Liste).
+  static Future<bool> applyProfile(PlaylistProfile p) async {
+    if (p.mode == 'm3u') return await loadM3u(p.url, allowCache: true); // nutzt Cache -> schnell
+    await save(Account(p.host, p.user, p.pass));
+    return true;
+  }
+
+  /// Eine Playlist NUR als aktive Quelle setzen, OHNE sie zu laden (schnell).
+  /// Die Liste wird erst beim nächsten Öffnen (HomeGate.restoreActive) geladen.
+  /// -> Löschen/Umschalten blockiert nicht auf großen M3U-Downloads.
+  static Future<void> setProfileNoLoad(PlaylistProfile p) async {
+    final pr = await SharedPreferences.getInstance();
+    if (p.mode == 'm3u') {
+      account = null; mode = 'm3u'; m3u = []; m3uUrl = p.url;
+      await pr.setString('src_mode', 'm3u');
+      await pr.setString('m3u_url', p.url);
+      await pr.remove('xt_host'); await pr.remove('xt_user'); await pr.remove('xt_pass');
+    } else {
+      await save(Account(p.host, p.user, p.pass)); // Xtream: ohnehin ohne Laden
+    }
+  }
 }
 
 class Category {
@@ -237,43 +426,99 @@ class Item {
 }
 
 class Xtream {
+  /// Serienname aus einem Episoden-Titel (alles vor „S01E02"). Für M3U-Serien-Gruppierung.
+  static final RegExp _seRe = RegExp(r'[\s\-_.]*S(\d{1,3})\s*E(\d{1,4})', caseSensitive: false);
+  static String _seriesName(String title) {
+    final m = _seRe.firstMatch(title);
+    return (m != null ? title.substring(0, m.start) : title).trim();
+  }
+  static List<int> _seNums(String title) {
+    final m = _seRe.firstMatch(title);
+    if (m == null) return const [1, 1];
+    return [int.tryParse(m.group(1)!) ?? 1, int.tryParse(m.group(2)!) ?? 1];
+  }
+
   static String base(String host) {
     var b = host.trim();
     if (!RegExp(r'^https?://', caseSensitive: false).hasMatch(b)) b = 'http://$b';
     return b.replaceAll(RegExp(r'/+$'), '');
   }
 
+  /// Xtream-API-URL bauen. Nicht-Web (Desktop/Handy) hat kein CORS -> DIREKT zum
+  /// Anbieter (player_api.php). Das umgeht Provider, die die Hub-/Datacenter-IP
+  /// blocken (z. B. d67 timeoutet vom Server, klappt aber von der Heim-IP).
+  /// Nur der Web-Build (velatv) muss über den Hub-Proxy (CORS).
+  static Uri _apiUri(String host, String user, String pass, String? action, [Map<String, String>? extra]) {
+    // Standard-Xtream-Aktionen heißen get_* (get_live_categories, get_live_streams, get_series …).
+    // Ohne das Präfix liefern strenge Panels (z. B. ip.sltv.be) nur das user_info-Objekt zurück
+    // -> „kein-array". Darum hier immer get_ voranstellen (außer user_info).
+    final act = (action != null && action != 'user_info' && !action.startsWith('get_')) ? 'get_$action' : action;
+    if (!kOnWeb) {
+      final q = <String, String>{'username': user, 'password': pass};
+      if (act != null && act != 'user_info') q['action'] = act; // user_info = player_api ohne action
+      if (extra != null) q.addAll(extra);
+      return Uri.parse('${base(host)}/player_api.php').replace(queryParameters: q);
+    }
+    final q = <String, String>{'host': host, 'username': user, 'password': pass};
+    if (act != null) q['action'] = act;
+    if (extra != null) q.addAll(extra);
+    return Uri.parse(kProxy).replace(queryParameters: q);
+  }
+
+  static String diag = ''; // letzte API-Diagnose (für sichtbare Fehlermeldungen)
+
   static Future<dynamic> _get(String action, [Map<String, String>? extra]) async {
     final a = Session.account!;
-    final uri = Uri.parse(kProxy).replace(queryParameters: {
-      'action': action, 'host': a.host, 'username': a.user, 'password': a.pass, ...?extra,
-    });
-    final r = await http.get(uri).timeout(const Duration(seconds: 25));
-    if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
-    return jsonDecode(r.body);
+    final uri = _apiUri(a.host, a.user, a.pass, action, extra);
+    Object? lastErr;
+    dynamic lastJson; bool gotJson = false;
+    // Manche Anbieter (z. B. d67, max 1 Verbindung) antworten sporadisch leer/abweisend,
+    // wenn parallele Abfragen laufen -> bis zu 3 Versuche mit kurzer Pause.
+    for (var attempt = 1; attempt <= 3; attempt++) {
+      try {
+        final r = await http.get(uri).timeout(const Duration(seconds: 25));
+        if (r.statusCode != 200) { lastErr = 'HTTP ${r.statusCode}'; }
+        else {
+          final body = r.body.trim();
+          if (body.isEmpty) { lastErr = 'leere Antwort'; }
+          else {
+            final j = jsonDecode(body);
+            gotJson = true; lastJson = j;
+            if (j is! List) { diag = '$action: kein-array: ${body.substring(0, body.length < 180 ? body.length : 180)}'; return j; } // Map/Detail
+            if (j.isNotEmpty) { diag = '$action: ok(${j.length})'; return j; }
+            lastErr = 'leeres Array';                                   // evtl. transient -> nochmal
+          }
+        }
+      } catch (e) { lastErr = e; }
+      if (attempt < 3) await Future.delayed(Duration(milliseconds: 500 * attempt));
+    }
+    if (gotJson) { diag = '$action: leer nach 3 Versuchen'; return lastJson; } // ehrlich leer
+    diag = '$action: $lastErr';
+    throw Exception('$lastErr');
   }
 
   /// Verbindung testen + Konto-Infos holen.
   static Future<Map<String, dynamic>?> userInfo(Account a) async {
-    final uri = Uri.parse(kProxy).replace(queryParameters: {
-      'action': 'user_info', 'host': a.host, 'username': a.user, 'password': a.pass,
-    });
+    final uri = _apiUri(a.host, a.user, a.pass, 'user_info');
     try {
       final r = await http.get(uri).timeout(const Duration(seconds: 20));
-      if (r.statusCode != 200) return null;
+      if (r.statusCode != 200) { diag = 'user_info HTTP ${r.statusCode}'; return null; }
       final j = jsonDecode(r.body);
-      if (j is Map && j['user_info'] is Map) {
-        return Map<String, dynamic>.from(j['user_info']);
+      final ui = (j is Map) ? j['user_info'] : null;
+      if (ui is Map) {
+        if ('${ui['auth']}' == '0') { diag = 'auth=0 (Zugangsdaten abgelehnt/abgelaufen)'; return null; } // ungültige Creds
+        return Map<String, dynamic>.from(ui);
       }
-    } catch (_) {}
+      diag = 'user_info fehlt in Antwort';
+    } catch (e) { diag = 'user_info ex: $e'; }
     return null;
   }
 
   static Future<List<Category>> categoriesRaw(String type) async {
     if (Session.mode == 'm3u') {
-      if (type != 'live') return []; // M3U kennt keine VOD-/Serien-Kategorien
+      // Kategorien = Gruppen (group-title) der Einträge dieses Typs (live/vod/series).
       final seen = <String>{}; final out = <Category>[];
-      for (final c in Session.m3u) { if (seen.add(c.group)) out.add(Category(c.group, c.group)); }
+      for (final c in Session.m3u) { if (c.kind == type && seen.add(c.group)) out.add(Category(c.group, c.group)); }
       return out;
     }
     final action = type == 'live'
@@ -294,9 +539,25 @@ class Xtream {
     return all.where((c) => Prefs.visible(c.name)).toList();
   }
 
+  /// Anzahl Einträge je Kategorie (für „(S|DE) … (42)" wie IBO). Schlüssel = category_id (Xtream)
+  /// bzw. group-title (M3U) — passt zu Category.id. Ein Aufruf lädt alle Streams des Typs.
+  static Future<Map<String, int>> categoryCounts(String type) async {
+    final m = <String, int>{};
+    if (Session.mode == 'm3u') {
+      for (final c in Session.m3u) { if (c.kind == type) m[c.group] = (m[c.group] ?? 0) + 1; }
+      return m;
+    }
+    final action = type == 'live' ? 'live_streams' : (type == 'series' ? 'series' : 'vod_streams');
+    final j = await _get(action);
+    if (j is List) {
+      for (final e in j) { final c = '${e['category_id'] ?? ''}'; if (c.isNotEmpty) m[c] = (m[c] ?? 0) + 1; }
+    }
+    return m;
+  }
+
   static Future<List<Item>> liveStreams(String catId) async {
     if (Session.mode == 'm3u') {
-      return Session.m3u.where((c) => c.group == catId).map((c) => Item(c.url, c.name, c.logo)).toList();
+      return Session.m3u.where((c) => c.kind == 'live' && c.group == catId).map((c) => Item(c.url, c.name, c.logo)).toList();
     }
     final j = await _get('live_streams', {'category_id': catId});
     if (j is! List) return [];
@@ -307,7 +568,10 @@ class Xtream {
   }
 
   static Future<List<Item>> vodStreams(String catId) async {
-    if (Session.mode == 'm3u') return [];
+    if (Session.mode == 'm3u') {
+      return Session.m3u.where((c) => c.kind == 'vod' && c.group == catId)
+          .map((c) => Item(c.url, c.name, c.logo, ext: c.ext)).toList();
+    }
     final j = await _get('vod_streams', {'category_id': catId});
     if (j is! List) return [];
     return j
@@ -319,7 +583,9 @@ class Xtream {
 
   /// Alle Filme / Serien (ohne Kategorie) – für die globale Suche.
   static Future<List<Item>> allVod() async {
-    if (Session.mode == 'm3u') return [];
+    if (Session.mode == 'm3u') {
+      return Session.m3u.where((c) => c.kind == 'vod').map((c) => Item(c.url, c.name, c.logo, ext: c.ext)).toList();
+    }
     final j = await _get('vod_streams');
     if (j is! List) return [];
     return j
@@ -331,7 +597,11 @@ class Xtream {
   }
 
   static Future<List<Item>> allSeries() async {
-    if (Session.mode == 'm3u') return [];
+    if (Session.mode == 'm3u') {
+      final seen = <String>{}; final out = <Item>[];
+      for (final c in Session.m3u) { if (c.kind == 'series') { final sn = _seriesName(c.name); if (seen.add(sn)) out.add(Item(sn, sn, c.logo)); } }
+      return out;
+    }
     final j = await _get('series');
     if (j is! List) return [];
     return j
@@ -344,10 +614,13 @@ class Xtream {
   /// + cacht; App bekommt nur die neuesten N). {'movies': [...], 'series': [...]}.
   static Future<Map<String, List<Item>>> homeLatest({int limit = 6}) async {
     const empty = {'movies': <Item>[], 'series': <Item>[]};
-    if (Session.mode != 'xtream' || Session.mac.isEmpty) return empty;
+    if (Session.mode != 'xtream' || Session.account == null || Session.mac.isEmpty) return empty;
     try {
+      final a = Session.account!;
       final uri = Uri.parse(kHomeLatest).replace(queryParameters: {
         'mac': Session.mac, 'key': Session.deviceKey, 'brand': kBrandKey, 'limit': '$limit',
+        // aktuelle Playlist direkt mitschicken -> Lobby passt IMMER zur aktiven (nicht zur am Hub registrierten)
+        'host': a.host, 'username': a.user, 'password': a.pass,
       });
       final r = await http.get(uri).timeout(const Duration(seconds: 30));
       if (r.statusCode != 200) return empty;
@@ -376,7 +649,15 @@ class Xtream {
   }
 
   static Future<List<Item>> seriesList(String catId) async {
-    if (Session.mode == 'm3u') return [];
+    if (Session.mode == 'm3u') {
+      final seen = <String>{}; final out = <Item>[];
+      for (final c in Session.m3u) {
+        if (c.kind != 'series' || c.group != catId) continue;
+        final sn = _seriesName(c.name);
+        if (seen.add(sn)) out.add(Item(sn, sn, c.logo)); // id = Serienname (Schlüssel für seriesInfo)
+      }
+      return out;
+    }
     final j = await _get('series', {'category_id': catId});
     if (j is! List) return [];
     return j
@@ -393,11 +674,13 @@ class Xtream {
   }
 
   static String vodUrl(String streamId, String ext) {
+    if (Session.mode == 'm3u') return streamId; // bei M3U ist die ID bereits die direkte URL
     final a = Session.account!;
     return '${base(a.host)}/movie/${a.user}/${a.pass}/$streamId.${ext.isEmpty ? 'mp4' : ext}';
   }
 
   static String seriesEpUrl(String epId, String ext) {
+    if (Session.mode == 'm3u') return epId; // bei M3U ist die Episoden-ID bereits die direkte URL
     final a = Session.account!;
     return '${base(a.host)}/series/${a.user}/${a.pass}/$epId.${ext.isEmpty ? 'mp4' : ext}';
   }
@@ -456,12 +739,24 @@ class Xtream {
 
   /// Film-Details (Plot, Cover, Meta).
   static Future<Map<String, dynamic>> vodInfo(String vodId) async {
+    if (Session.mode == 'm3u') return {}; // M3U hat keine TMDB-Detailinfos -> direkt abspielen
     final j = await _get('vod_info', {'vod_id': vodId});
     return (j is Map) ? Map<String, dynamic>.from(j) : {};
   }
 
   /// Serien-Details (info + episodes je Staffel).
   static Future<SeriesDetail> seriesInfo(String seriesId) async {
+    if (Session.mode == 'm3u') {
+      // Episoden dieser Serie aus der M3U sammeln, nach Staffel gruppieren (id = direkte URL).
+      final seasons = <String, List<Episode>>{};
+      for (final c in Session.m3u) {
+        if (c.kind != 'series' || _seriesName(c.name) != seriesId) continue;
+        final se = _seNums(c.name);
+        seasons.putIfAbsent('${se[0]}', () => []).add(Episode(c.url, c.name, c.ext, se[1]));
+      }
+      seasons.forEach((k, v) => v.sort((a, b) => a.num.compareTo(b.num)));
+      return SeriesDetail({'name': seriesId}, seasons);
+    }
     final j = await _get('series_info', {'series_id': seriesId});
     final info = (j is Map && j['info'] is Map) ? Map<String, dynamic>.from(j['info']) : <String, dynamic>{};
     final seasons = <String, List<Episode>>{};
@@ -507,6 +802,7 @@ class Prefs {
   static int subIdx = 1; // 0 groß, 1 normal, 2 klein
   static bool useFaceId = false;
   static String lang = 'de'; // App-Sprache
+  static double volume = 60; // zuletzt gewählte Lautstärke 0..100 (bleibt erhalten, auch über Neustart)
 
   static const _adult = ['XXX', 'ADULT', '+18', '18+', 'EROTIC', 'EROTIK', 'PORN', 'PORNO', 'FSK18', 'NIGHT CLUB'];
 
@@ -523,7 +819,18 @@ class Prefs {
     subIdx = p.getInt('sub_idx') ?? 1;
     useFaceId = p.getBool('use_faceid') ?? false;
     lang = p.getString('lang') ?? _deviceLang();
+    langChosen = p.getBool('lang_chosen') ?? false;
+    downloadDir = p.getString('download_dir') ?? '';
+    volume = (p.getDouble('volume') ?? 60).clamp(0.0, 100.0);
   }
+
+  static Future<void> setVolume(double v) async { volume = v.clamp(0.0, 100.0); await _p((p) => p.setDouble('volume', volume)); }
+
+  static String downloadDir = ''; // leer = Standard (D:\VelaDownloads). Vom Nutzer wählbar.
+  static Future<void> setDownloadDir(String v) async { downloadDir = v; await _p((p) => p.setString('download_dir', v)); }
+
+  static bool langChosen = false; // beim ersten Start Sprach-Screen zeigen, danach nie wieder
+  static Future<void> markLangChosen() async { langChosen = true; await _p((p) => p.setBool('lang_chosen', true)); }
 
   static const _supportedLangs = ['de', 'en', 'tr', 'ar', 'fr', 'it', 'el'];
   static String _deviceLang() {
@@ -558,6 +865,7 @@ class Prefs {
 /// Vela-Lizenz/Trial (lokal, persistiert). 10 Tage gratis ab erstem Verbinden,
 /// danach Freischaltung (Lifetime). Playlist-Ablauf kommt separat vom Anbieter (exp_date).
 class License {
+  static const bool freeForTesting = true; // TEST-Freischaltung: Paywall/Testphase aus (für Release wieder false)
   static const int trialDays = 10;
   static DateTime? trialStart;
   static bool paid = false;
@@ -613,7 +921,7 @@ class License {
   }
 
   static int get daysLeft {
-    if (paid) return trialDays;
+    if (freeForTesting || paid) return trialDays;
     if (serverKnown && serverDaysLeft != null) return serverDaysLeft!.clamp(0, trialDays);
     if (trialStart == null) return trialDays;
     final used = DateTime.now().difference(trialStart!).inDays;
@@ -621,6 +929,7 @@ class License {
   }
 
   static bool get trialExpired {
+    if (freeForTesting) return false; // Test-Freischaltung: nie Paywall
     if (paid) return false;
     if (serverKnown) return serverStatus == 'expired' || (serverDaysLeft != null && serverDaysLeft! <= 0);
     return trialStart != null && DateTime.now().difference(trialStart!).inDays >= trialDays;
@@ -663,41 +972,137 @@ class ResumeStore {
 class ContinueItem {
   final String url, title, poster;
   final int pos, dur;
-  ContinueItem(this.url, this.title, this.poster, this.pos, this.dur);
+  final List<dynamic>? queue; // Episoden-Warteschlange [{'t':titel,'u':url}] -> Weiter/Zurueck aus „Weiterschauen"
+  ContinueItem(this.url, this.title, this.poster, this.pos, this.dur, [this.queue]);
   double get progress => dur > 0 ? (pos / dur).clamp(0.0, 1.0) : 0.0;
 }
 
 class ContinueStore {
   static const _k = 'continue_v1';
+  static String scope = ''; // aktive Playlist-ID -> „Weiterschauen" pro Playlist getrennt
+  static String _sk() => scope.isEmpty ? _k : '${_k}_$scope';
   static List<Map<String, dynamic>> _items = [];
 
   static Future<void> load() async {
     final p = await SharedPreferences.getInstance();
-    final s = p.getString(_k);
+    var s = p.getString(_sk());
+    if (s == null && scope.isNotEmpty) {
+      // einmalige Migration: alten GLOBALEN Verlauf der aktiven Playlist zuschlagen
+      final g = p.getString(_k);
+      if (g != null) { s = g; await p.setString(_sk(), g); await p.remove(_k); }
+    }
+    _items = [];
     if (s != null) {
       try { _items = (jsonDecode(s) as List).map((e) => Map<String, dynamic>.from(e)).toList(); } catch (_) {}
     }
   }
 
   static List<ContinueItem> items() => _items
-      .map((e) => ContinueItem('${e['url']}', '${e['title']}', '${e['poster'] ?? ''}', e['pos'] ?? 0, e['dur'] ?? 0))
+      .map((e) => ContinueItem('${e['url']}', '${e['title']}', '${e['poster'] ?? ''}', e['pos'] ?? 0, e['dur'] ?? 0, e['queue'] as List<dynamic>?))
       .toList();
 
-  static Future<void> record({required String url, required String title, required String poster, required int pos, required int dur}) async {
+  /// Fortschritt (0..1) einer angefangenen Folge/eines Films, sonst null.
+  static double? progressOf(String url) {
+    for (final e in _items) {
+      if (e['url'] == url) {
+        final pos = (e['pos'] ?? 0) as int, dur = (e['dur'] ?? 0) as int;
+        return dur > 0 ? (pos / dur).clamp(0.02, 1.0) : null;
+      }
+    }
+    return null;
+  }
+
+  static Future<void> record({required String url, required String title, required String poster, required int pos, required int dur, List<Map<String, String>>? queue}) async {
     _items.removeWhere((e) => e['url'] == url);
     // Nur merken, wenn mittendrin (nicht ganz am Anfang/Ende).
     if (pos > 30 && (dur == 0 || pos < dur - 90)) {
-      _items.insert(0, {'url': url, 'title': title, 'poster': poster, 'pos': pos, 'dur': dur});
+      final m = {'url': url, 'title': title, 'poster': poster, 'pos': pos, 'dur': dur};
+      if (queue != null && queue.isNotEmpty) m['queue'] = queue; // Staffel-Warteschlange fuer Weiter/Zurueck
+      _items.insert(0, m);
       if (_items.length > 15) _items = _items.sublist(0, 15);
     }
     final p = await SharedPreferences.getInstance();
-    await p.setString(_k, jsonEncode(_items));
+    await p.setString(_sk(), jsonEncode(_items));
   }
 
   static Future<void> remove(String url) async {
     _items.removeWhere((e) => e['url'] == url);
     final p = await SharedPreferences.getInstance();
-    await p.setString(_k, jsonEncode(_items));
+    await p.setString(_sk(), jsonEncode(_items));
+  }
+}
+
+/// Fertig gesehene Folgen/Filme (URL-Set) — fürs „✓ Gesehen" in der Folgen-Liste.
+/// Pro Playlist getrennt (scope = Playlist-ID), persistiert.
+class WatchedStore {
+  static const _k = 'watched_v1';
+  static String scope = '';
+  static String _sk() => scope.isEmpty ? _k : '${_k}_$scope';
+  static Set<String> _set = {};
+
+  static Future<void> load() async {
+    final p = await SharedPreferences.getInstance();
+    _set = (p.getStringList(_sk()) ?? []).toSet();
+  }
+  static bool isWatched(String url) => _set.contains(url);
+  static Future<void> mark(String url) async {
+    if (_set.add(url)) { final p = await SharedPreferences.getInstance(); await p.setStringList(_sk(), _set.toList()); }
+  }
+  static Future<void> unmark(String url) async {
+    if (_set.remove(url)) { final p = await SharedPreferences.getInstance(); await p.setStringList(_sk(), _set.toList()); }
+  }
+}
+
+/// Eine gespeicherte Playlist (Profil) für die Mehr-Playlist-Verwaltung (wie IBO „Change Playlist").
+class PlaylistProfile {
+  final String id, name, mode, url, host, user, pass;
+  PlaylistProfile({required this.id, required this.name, required this.mode,
+      this.url = '', this.host = '', this.user = '', this.pass = ''});
+  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'mode': mode, 'url': url, 'host': host, 'user': user, 'pass': pass};
+  static PlaylistProfile fromJson(Map e) => PlaylistProfile(
+        id: '${e['id']}', name: '${e['name']}', mode: '${e['mode']}',
+        url: '${e['url'] ?? ''}', host: '${e['host'] ?? ''}', user: '${e['user'] ?? ''}', pass: '${e['pass'] ?? ''}');
+  String get identity => mode == 'm3u' ? 'm|$url' : 'x|$host|$user';
+  String get subtitle => mode == 'm3u' ? 'M3U-Playlist' : 'Xtream · $user';
+}
+
+/// Speicher für mehrere Playlists + welche aktiv ist. Persistiert.
+class PlaylistStore {
+  static const _k = 'playlists_v1';
+  static const _kActive = 'active_playlist';
+  static List<PlaylistProfile> _items = [];
+  static String activeId = '';
+
+  static Future<void> load() async {
+    final p = await SharedPreferences.getInstance();
+    final s = p.getString(_k);
+    if (s != null) { try { _items = (jsonDecode(s) as List).map((e) => PlaylistProfile.fromJson(Map<String, dynamic>.from(e))).toList(); } catch (_) {} }
+    activeId = p.getString(_kActive) ?? '';
+  }
+
+  static List<PlaylistProfile> items() => List.unmodifiable(_items);
+  static PlaylistProfile? active() { for (final p in _items) { if (p.id == activeId) return p; } return null; }
+
+  static Future<void> _persist() async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_k, jsonEncode(_items.map((e) => e.toJson()).toList()));
+    await p.setString(_kActive, activeId);
+  }
+
+  /// Playlist speichern (vorhandene gleicher Identität wird wiederverwendet) und aktiv setzen.
+  static Future<PlaylistProfile> upsert({required String name, required String mode, String url = '', String host = '', String user = '', String pass = ''}) async {
+    final prof = PlaylistProfile(id: DateTime.now().microsecondsSinceEpoch.toString(), name: name, mode: mode, url: url, host: host, user: user, pass: pass);
+    final idx = _items.indexWhere((e) => e.identity == prof.identity);
+    if (idx >= 0) { activeId = _items[idx].id; } else { _items.insert(0, prof); activeId = prof.id; }
+    await _persist();
+    return active() ?? prof;
+  }
+
+  static Future<void> setActive(String id) async { activeId = id; await _persist(); }
+  static Future<void> remove(String id) async {
+    _items.removeWhere((e) => e.id == id);
+    if (activeId == id) activeId = _items.isNotEmpty ? _items.first.id : '';
+    await _persist();
   }
 }
 
@@ -705,11 +1110,19 @@ class ContinueStore {
 /// kind: 'live' | 'vod' | 'series'.
 class FavStore {
   static const _k = 'fav_v2';
+  static String scope = ''; // aktive Playlist-ID -> Favoriten pro Playlist getrennt
+  static String _sk() => scope.isEmpty ? _k : '${_k}_$scope';
   static List<Map<String, dynamic>> _cache = [];
 
   static Future<void> load() async {
     final p = await SharedPreferences.getInstance();
-    final s = p.getString(_k);
+    var s = p.getString(_sk());
+    if (s == null && scope.isNotEmpty) {
+      // einmalige Migration: alte GLOBALE Favoriten der aktiven Playlist zuschlagen
+      final g = p.getString(_k);
+      if (g != null) { s = g; await p.setString(_sk(), g); await p.remove(_k); }
+    }
+    _cache = [];
     if (s != null) {
       try { _cache = (jsonDecode(s) as List).map((e) => Map<String, dynamic>.from(e)).toList(); } catch (_) {}
       return;
@@ -755,7 +1168,7 @@ class FavStore {
 
   static Future<void> _save() async {
     final p = await SharedPreferences.getInstance();
-    await p.setString(_k, jsonEncode(_cache));
+    await p.setString(_sk(), jsonEncode(_cache));
   }
 }
 
